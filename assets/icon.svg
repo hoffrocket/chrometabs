@@ -1,0 +1,69 @@
+<!--
+  Source art for the extension icons. Rasterized to PNG by
+  `npm run icons` (scripts/make-icons.js) — Chrome does not accept SVG
+  for extension icons.
+
+  This is the detailed variant, used at 48px and 128px. The 16/32px sizes
+  use icon-small.svg, which drops the scythe and body: at 16px the full
+  figure turns to mud, but a hooded skull still reads.
+
+  Colours are mid-tone on purpose. A pure-black silhouette would disappear
+  against Chrome's dark-theme toolbar, and a pure-white one against the
+  light theme, so the cloak is dark enough to read on light backgrounds
+  while the bone-white skull carries the shape on dark ones.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="cloak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4b5170" />
+      <stop offset="1" stop-color="#2b2f45" />
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f5fb" />
+      <stop offset="1" stop-color="#a7b0c6" />
+    </linearGradient>
+  </defs>
+
+  <!-- Scythe. The shaft runs corner to corner and the blade hooks into the
+       empty top-right, clear of the hood — overlapping the figure made the
+       blade read as a stray stick rather than a weapon. -->
+  <g stroke-linecap="round">
+    <path d="M30 122 L100 30" stroke="#7a5a3c" stroke-width="7" />
+    <path d="M30 122 L100 30" stroke="#5e432b" stroke-width="7"
+          stroke-dasharray="5 11" opacity="0.45" />
+  </g>
+  <!-- The blade is a crescent sweeping left from the top of the shaft. A
+       straight taper here read as a spear; a scythe needs the concave hook. -->
+  <path d="M100 30
+           C88 12 66 4 44 8
+           C64 16 82 28 92 46
+           C93 39 96 34 100 30 Z"
+        fill="url(#steel)" />
+
+  <!-- Cloaked body, set slightly left of centre to leave the blade room. -->
+  <path d="M58 18 C39 18 26 34 26 54 C26 63 24 70 20 80
+           C15 93 12 106 12 118 L104 118
+           C104 106 101 93 96 80 C92 70 90 63 90 54
+           C90 34 77 18 58 18 Z"
+        fill="url(#cloak)" />
+
+  <!-- Hood opening: the void the face sits in. -->
+  <path d="M58 30 C43 30 34 43 34 58 C34 74 45 86 58 86
+           C71 86 82 74 82 58 C82 43 73 30 58 30 Z"
+        fill="#14161f" />
+
+  <!-- Skull. The jaw is drawn as teeth rather than an outlined box, which at
+       small sizes looked like a mouth guard. -->
+  <path d="M58 38 C47 38 39 47 39 58 C39 66 43 72 49 76
+           L49 80 C49 82 51 84 53 84 L63 84 C65 84 67 82 67 80
+           L67 76 C73 72 77 66 77 58 C77 47 69 38 58 38 Z"
+        fill="#eef1f7" />
+  <ellipse cx="50" cy="57" rx="6" ry="7.5" fill="#14161f" />
+  <ellipse cx="66" cy="57" rx="6" ry="7.5" fill="#14161f" />
+  <path d="M58 65 L54.5 72 L61.5 72 Z" fill="#14161f" />
+  <g stroke="#14161f" stroke-width="2" stroke-linecap="round">
+    <path d="M53 78 V83" />
+    <path d="M58 78 V83" />
+    <path d="M63 78 V83" />
+  </g>
+</svg>

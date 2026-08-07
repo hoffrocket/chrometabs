@@ -138,6 +138,7 @@ The download is Chrome for Testing, used by both the test suite and
 | `npm run test:unit` | Pure logic via `node:test`. No browser, milliseconds. |
 | `npm run test:browser` | Playwright tests against a real Chrome. |
 | `npm run chrome` | Opens a disposable Chrome with the extension loaded. |
+| `npm run icons` | Rebuilds `extension/icons/*.png` from `assets/*.svg`. |
 | `node scripts/smoke.js` | One end-to-end pass; `--screenshot out.png` to capture the options page. |
 
 ### The loop
@@ -159,6 +160,30 @@ When you fix a bug, add the test that fails without the fix — then verify it
 really fails by reverting the fix temporarily. The activity-map race in
 [Implementation notes](#implementation-notes) was found that way, and its
 regression test only catches 1-of-8 recorded tabs when the fix is removed.
+
+### Editing the icon
+
+The grim reaper is authored as SVG in `assets/`, but Chrome only accepts PNG
+for extension icons, so `npm run icons` rasterizes it into
+`extension/icons/icon-{16,32,48,128}.png`. Both the SVG sources and the
+generated PNGs are committed — the extension must work from a plain checkout,
+with no build step before **Load unpacked**.
+
+There are two source files on purpose:
+
+- `assets/icon.svg` — the full figure with scythe, used at 48px and 128px.
+- `assets/icon-small.svg` — a cropped hooded skull, used at 16px and 32px.
+  The detailed art turns to mud at toolbar size: the scythe becomes a stray
+  diagonal and the hem detail becomes noise.
+
+Rasterizing happens by screenshotting the SVG in the headless Chrome the tests
+already use — no image-processing dependency — rendered at 4x and downscaled,
+which antialiases the curves far better than rasterizing straight to 16px.
+
+After editing the art, run `npm run icons`, commit the PNGs, and reload the
+extension at `chrome://extensions`. Check the small sizes, not just the 128px
+version; `options.spec.js` asserts every declared icon actually loads, since a
+missing icon file fails silently in the toolbar.
 
 ### Running it in a disposable Chrome
 
@@ -218,12 +243,15 @@ extension/                MV3 extension — chrome.* APIs only
   background.js           service worker: tracks activity, runs sweeps
   lib/reaper.js           pure decision logic (no chrome.* — unit tested)
   options.html/.css/.js   settings UI
+  icons/                  generated PNGs (committed; see npm run icons)
+assets/                   icon source art (SVG)
 test/
   unit/                   node:test over lib/reaper.js
   browser/                Playwright tests driving real Chrome
     fixtures.js           the `ext` fixture and extension-context helpers
 scripts/
   launch-chrome.js        disposable Chrome for manual poking
+  make-icons.js           SVG -> PNG rasterizer
   smoke.js                end-to-end check + screenshot
 playwright.config.js
 ```

@@ -1,0 +1,36 @@
+<!--
+  Small-size variant, used for the 16px and 32px icons.
+
+  At 16px the full figure from icon.svg collapses into an unreadable smudge:
+  the scythe becomes a stray diagonal and the hem detail turns to noise. This
+  variant keeps only the silhouette that survives at that size — a hooded
+  skull, cropped closer, with fewer and heavier features.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="cloakSmall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4b5170" />
+      <stop offset="1" stop-color="#2b2f45" />
+    </linearGradient>
+  </defs>
+
+  <!-- Hood: a broad shape that stays legible when it is 16 pixels across. -->
+  <path d="M64 6 C34 6 14 30 14 62 C14 88 22 108 30 122 L98 122
+           C106 108 114 88 114 62 C114 30 94 6 64 6 Z"
+        fill="url(#cloakSmall)" />
+
+  <!-- Hood opening. -->
+  <path d="M64 22 C42 22 30 42 30 62 C30 86 45 104 64 104
+           C83 104 98 86 98 62 C98 42 86 22 64 22 Z"
+        fill="#14161f" />
+
+  <!-- Skull, enlarged relative to the detailed variant so the eye sockets
+       remain visible after downscaling. -->
+  <path d="M64 34 C46 34 34 48 34 63 C34 74 40 83 49 88
+           L49 95 C49 98 52 100 55 100 L73 100 C76 100 79 98 79 95
+           L79 88 C88 83 94 74 94 63 C94 48 82 34 64 34 Z"
+        fill="#eef1f7" />
+  <ellipse cx="52" cy="62" rx="9" ry="11" fill="#14161f" />
+  <ellipse cx="76" cy="62" rx="9" ry="11" fill="#14161f" />
+  <path d="M64 73 L58 84 L70 84 Z" fill="#14161f" />
+</svg>

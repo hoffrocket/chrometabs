@@ -26,6 +26,39 @@ test('options page saves settings and the service worker reads them back', async
   });
 });
 
+test('the manifest declares icons that Chrome can actually load', async ({
+  context,
+  extensionId,
+  worker,
+}) => {
+  const manifest = await worker.evaluate(() => chrome.runtime.getManifest());
+  const declared = [
+    ...Object.values(manifest.icons ?? {}),
+    ...Object.values(manifest.action?.default_icon ?? {}),
+  ];
+  expect(declared.length).toBeGreaterThan(0);
+
+  // A missing icon file is a silent failure in the toolbar, so fetch each one.
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+  for (const relative of new Set(declared)) {
+    const status = await page.evaluate(
+      (url) => fetch(url).then((r) => r.status),
+      `chrome-extension://${extensionId}/${relative}`,
+    );
+    expect(status, `${relative} should be fetchable`).toBe(200);
+  }
+
+  // The options header renders the same art; naturalWidth stays 0 if it 404s.
+  const header = await page.evaluate(() => {
+    const img = document.querySelector('h1 img');
+    return { present: Boolean(img), width: img?.naturalWidth ?? 0 };
+  });
+  expect(header.present).toBe(true);
+  expect(header.width).toBeGreaterThan(0);
+});
+
 test('the shipped default timeout is 12 hours', async ({ context, extensionId }) => {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/options.html`);
