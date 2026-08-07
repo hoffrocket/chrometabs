@@ -1,3 +1,5 @@
+<img src="assets/icon.svg" alt="" width="104" height="104" align="right" />
+
 # Tab Reaper
 
 [![Tests](https://github.com/hoffrocket/chrometabs/actions/workflows/test.yml/badge.svg)](https://github.com/hoffrocket/chrometabs/actions/workflows/test.yml)
@@ -173,10 +175,14 @@ with no build step before **Load unpacked**.
 
 There are two source files on purpose:
 
-- `assets/icon.svg` — the full figure with scythe, used at 48px and 128px.
-- `assets/icon-small.svg` — a cropped hooded skull, used at 16px and 32px.
-  The detailed art turns to mud at toolbar size: the scythe becomes a stray
-  diagonal and the hem detail becomes noise.
+| | Source | Used at | Why |
+| --- | --- | --- | --- |
+| <img src="assets/icon.svg" alt="the full grim reaper figure with scythe" width="64" height="64" /> | `assets/icon.svg` | 48px, 128px | The full figure with scythe. |
+| <img src="assets/icon-small.svg" alt="a cropped hooded skull" width="64" height="64" /> | `assets/icon-small.svg` | 16px, 32px | The detailed art turns to mud at toolbar size: the scythe becomes a stray diagonal and the hem detail becomes noise, so the small variant crops to just the hooded skull. |
+
+(Those are the SVG sources rendered at 64px. What Chrome actually ships is the
+rasterized PNG, so judge the result at `chrome://extensions` and in the toolbar,
+not here.)
 
 Rasterizing happens by screenshotting the SVG in the headless Chrome the tests
 already use — no image-processing dependency — rendered at 4x and downscaled,
