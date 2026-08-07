@@ -4,3 +4,7 @@ playwright-report/
 .playwright-profile/
 .chrome-dev-profile/
 .DS_Store
+
+# Built store packages. Regenerate with `npm run package`; the release
+# workflow builds its own rather than trusting a committed artifact.
+dist/

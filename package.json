@@ -9,7 +9,9 @@
     "test:browser": "playwright test",
     "test": "npm run test:unit && npm run test:browser",
     "chrome": "node scripts/launch-chrome.js",
-    "icons": "node scripts/make-icons.js"
+    "icons": "node scripts/make-icons.js",
+    "package": "node scripts/package.js",
+    "publish:store": "node scripts/publish.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0"

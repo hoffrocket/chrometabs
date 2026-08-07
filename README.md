@@ -16,6 +16,7 @@ real browser in the tests; nothing under `extension/` imports it.
 - [Installing in your own Chrome](#installing-in-your-own-chrome)
 - [Settings](#settings)
 - [Development workflow](#development-workflow)
+- [Releasing](#releasing)
 - [Layout](#layout)
 - [Implementation notes](#implementation-notes)
 
@@ -143,6 +144,7 @@ The download is Chrome for Testing, used by both the test suite and
 | `npm run test:browser` | Playwright tests against a real Chrome. |
 | `npm run chrome` | Opens a disposable Chrome with the extension loaded. |
 | `npm run icons` | Rebuilds `extension/icons/*.png` from `assets/*.svg`. |
+| `npm run package` | Builds `dist/tab-reaper-<version>.zip` for the Web Store. |
 | `node scripts/smoke.js` | One end-to-end pass; `--screenshot out.png` to capture the options page. |
 
 ### The loop
@@ -226,9 +228,13 @@ handle. Route timestamp edits through `updateActivity` rather than writing
 
 ### How the tests are organized
 
-- **`test/unit/`** (20 tests) exercises `extension/lib/reaper.js`: thresholds,
-  allowlist matching, rule parsing and specificity, exemptions. Plain Node, no
-  browser.
+- **`test/unit/`** (39 tests) is plain Node, no browser.
+  - `reaper.test.js` exercises `extension/lib/reaper.js`: thresholds, allowlist
+    matching, rule parsing and specificity, exemptions.
+  - `zip.test.js` checks the hand-rolled ZIP writer's bytes against the spec.
+  - `package.test.js` extracts a real store package with the system `unzip` —
+    an independent implementation, since our own reader could share a bug with
+    our writer — and asserts the archive holds exactly the declared files.
 - **`test/browser/`** (20 tests) loads the real extension into a real Chrome and
   drives it through the actual `chrome.tabs` API — opening tabs, pinning,
   activating, sweeping — then asserts which tabs survived.
@@ -279,6 +285,31 @@ of it: the form is now `disabled` until the settings read resolves (so a real
 user's typing can't be discarded either), and the test asserts
 `ext.getSettings()` rather than trusting the status line.
 
+## Releasing
+
+Releases are automated. Bump the version in `extension/manifest.json`, then push
+a matching tag:
+
+```sh
+git commit -am "Release v0.2.0"
+git tag v0.2.0
+git push origin master --tags
+```
+
+`.github/workflows/release.yml` runs the full suite, checks the tag against the
+manifest, and waits for your approval before submitting to the Chrome Web Store.
+
+Authentication uses **workload identity federation**, so no credential is stored
+in GitHub — GitHub mints a short-lived OIDC token per run and Google exchanges it
+for a 10-minute access token scoped to the Web Store alone. There is nothing to
+leak or rotate.
+
+Two things need a human, both Google's limitation: **version 1 must be uploaded
+through the dashboard by hand** (the API can only update an existing item), and
+review still gates going live.
+
+**[Full setup and security model → `docs/publishing.md`](docs/publishing.md)**
+
 ## Layout
 
 ```
@@ -289,14 +320,19 @@ extension/                MV3 extension — chrome.* APIs only
   options.html/.css/.js   settings UI
   icons/                  generated PNGs (committed; see npm run icons)
 assets/                   icon source art (SVG)
+docs/
+  publishing.md           Web Store release setup and security model
 test/
-  unit/                   node:test over lib/reaper.js
+  unit/                   node:test — reaper logic, zip writer, packaging
   browser/                Playwright tests driving real Chrome
     fixtures.js           the `ext` fixture and extension-context helpers
 scripts/
   launch-chrome.js        disposable Chrome for manual poking
   make-icons.js           SVG -> PNG rasterizer
   smoke.js                end-to-end check + screenshot
+  package.js              builds the store zip (explicit file allowlist)
+  publish.js              uploads + publishes via the Web Store API v2
+  lib/zip.js              minimal ZIP writer (no dependencies)
 playwright.config.js
 ```
 
@@ -330,3 +366,9 @@ playwright.config.js
   `storage.sync` is asynchronous and overwrites every field, so an editable
   field before that point would silently discard whatever was typed into it —
   and then save the stale value while still reporting success.
+- **The release tooling has no dependencies either.** Node ships `zlib` but no
+  archive format, so `scripts/lib/zip.js` writes the ZIP container by hand
+  (~120 lines) rather than pulling in a packaging library, and `publish.js`
+  talks to Google's REST APIs with `fetch`. Archives are byte-reproducible:
+  timestamps are fixed and entry order is explicit, so the same source always
+  yields the same package.

@@ -1,0 +1,143 @@
+name: Release
+
+# Publishing is triggered by pushing a version tag (v1.2.3). The tag must match
+# extension/manifest.json's version, and the whole test suite has to pass,
+# before anything is sent to the store.
+#
+# Deliberately no third-party actions: everything here is `run:` steps against
+# Google's REST APIs, so no external action can see the publish credentials.
+# Even the two GitHub-authored actions used (checkout, setup-node) run in the
+# `verify` job, which holds no credentials at all.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and validate the package without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything that can fail cheaply happens here, before any credential is
+  # minted and before the store is contacted.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # A tag that disagrees with the manifest means the release would ship a
+      # version other than the one the tag names. The store versions releases
+      # by the manifest, so the manifest is the source of truth and the tag has
+      # to agree with it.
+      - name: Check the tag matches the manifest version
+        id: version
+        run: |
+          set -euo pipefail
+          manifest_version="$(node -p 'require("./extension/manifest.json").version')"
+          echo "version=$manifest_version" >> "$GITHUB_OUTPUT"
+          echo "manifest.json declares $manifest_version"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [ "$tag_version" != "$manifest_version" ]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match manifest version $manifest_version."
+              exit 1
+            fi
+            echo "Tag ${GITHUB_REF_NAME} matches."
+          fi
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chrome for Testing
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: npm run test:browser
+
+      # Build the package here too, so a packaging error surfaces before the
+      # release job asks for credentials.
+      - name: Build the store package
+        run: npm run package
+
+      - name: Upload the package for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: tab-reaper-${{ steps.version.outputs.version }}
+          path: dist/*.zip
+          retention-days: 30
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The `release` environment is the approval gate and the only place the
+    # store identifiers live. Configure it with required reviewers so a tag
+    # push waits for a human before anything is submitted.
+    environment:
+      name: release
+      url: https://chrome.google.com/webstore/detail/${{ vars.CWS_ITEM_ID }}
+    permissions:
+      # Mints the OIDC token that Google exchanges for a short-lived access
+      # token. This is the entire reason no long-lived key is stored anywhere.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Only Playwright is a dev dependency and publishing does not need it,
+      # but `npm ci` keeps the lockfile authoritative and the tree identical to
+      # the verified one.
+      - run: npm ci
+
+      # A manual dry run still authenticates and reads the item back. That
+      # exercises the parts most likely to be misconfigured — the federation
+      # binding, the dashboard's service-account link, the publisher and item
+      # IDs — without submitting anything. Skipping the job entirely would
+      # leave all of that untested until a real release.
+      #
+      # Rebuild rather than downloading the verify job's artifact: an artifact
+      # is mutable by any later job, and the build is deterministic, so
+      # rebuilding from the checked-out tag is both simpler and safer.
+      - name: Publish to the Chrome Web Store
+        env:
+          # Non-secret identifiers, kept as environment variables so they are
+          # visible in logs for debugging.
+          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+          CWS_ITEM_ID: ${{ vars.CWS_ITEM_ID }}
+          CWS_SERVICE_ACCOUNT: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          CWS_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}
+          # Cross-check inside the script as well, so a manual run cannot
+          # publish a version the tag does not name.
+          CWS_EXPECT_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            node scripts/publish.js --check-auth
+          else
+            npm run publish:store
+          fi
