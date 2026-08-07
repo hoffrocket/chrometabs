@@ -1,4 +1,4 @@
-<img src="assets/icon.svg" alt="" width="104" height="104" align="right" />
+![Tab Reaper](assets/icon.svg)
 
 # Tab Reaper
 
@@ -177,12 +177,12 @@ There are two source files on purpose:
 
 | | Source | Used at | Why |
 | --- | --- | --- | --- |
-| <img src="assets/icon.svg" alt="the full grim reaper figure with scythe" width="64" height="64" /> | `assets/icon.svg` | 48px, 128px | The full figure with scythe. |
-| <img src="assets/icon-small.svg" alt="a cropped hooded skull" width="64" height="64" /> | `assets/icon-small.svg` | 16px, 32px | The detailed art turns to mud at toolbar size: the scythe becomes a stray diagonal and the hem detail becomes noise, so the small variant crops to just the hooded skull. |
+| ![the full grim reaper figure with scythe](assets/icon.svg) | `assets/icon.svg` | 48px, 128px | The full figure with scythe. |
+| ![a cropped hooded skull](assets/icon-small.svg) | `assets/icon-small.svg` | 16px, 32px | The detailed art turns to mud at toolbar size: the scythe becomes a stray diagonal and the hem detail becomes noise, so the small variant crops to just the hooded skull. |
 
-(Those are the SVG sources rendered at 64px. What Chrome actually ships is the
+Those are the SVG sources at full size. What Chrome actually ships is the
 rasterized PNG, so judge the result at `chrome://extensions` and in the toolbar,
-not here.)
+not here.
 
 Rasterizing happens by screenshotting the SVG in the headless Chrome the tests
 already use — no image-processing dependency — rendered at 4x and downscaled,
