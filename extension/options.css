@@ -1,0 +1,119 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --text: #1b1d21;
+  --muted: #61656e;
+  --border: #d9dce1;
+  --accent: #2f6feb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --card: #21232a;
+    --text: #ecedf0;
+    --muted: #a0a4ad;
+    --border: #34373f;
+    --accent: #5b8dfb;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 32px 20px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main { max-width: 520px; margin: 0 auto; }
+
+h1 { font-size: 20px; margin: 0 0 20px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.row + .row { margin-top: 14px; }
+
+.row.column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.row.column > span { margin-bottom: 8px; }
+
+.row.toggle { justify-content: flex-start; }
+
+.field { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.unit { color: var(--muted); }
+
+input[type="number"] {
+  width: 92px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.hint { margin: 10px 0 0; color: var(--muted); font-size: 12.5px; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.actions { display: flex; align-items: center; gap: 10px; }
+
+button {
+  font: inherit;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); }
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+#status { color: var(--muted); font-size: 13px; }

@@ -1,0 +1,16 @@
+{
+  "name": "chrometabs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tab Reaper — a Chrome extension that auto-closes tabs after a configurable idle period.",
+  "type": "module",
+  "scripts": {
+    "test:unit": "node --test \"test/unit/**/*.test.js\"",
+    "test:browser": "playwright test",
+    "test": "npm run test:unit && npm run test:browser",
+    "chrome": "node scripts/launch-chrome.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0"
+  }
+}

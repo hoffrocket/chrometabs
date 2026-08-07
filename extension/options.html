@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tab Reaper settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Tab Reaper</h1>
+
+      <section class="card">
+        <label class="row toggle">
+          <input type="checkbox" id="enabled" />
+          <span>Automatically close idle tabs</span>
+        </label>
+
+        <label class="row" for="idleMinutes">
+          <span>Close a tab after it has been unused for</span>
+          <span class="field">
+            <input type="number" id="idleMinutes" min="1" max="100000" step="1" />
+            <span class="unit">minutes</span>
+          </span>
+        </label>
+        <p class="hint" id="idleHint"></p>
+      </section>
+
+      <section class="card">
+        <label class="row column" for="allowlist">
+          <span>Never close these sites</span>
+          <textarea id="allowlist" rows="6" spellcheck="false"
+            placeholder="example.com&#10;*.google.com"></textarea>
+        </label>
+        <p class="hint">
+          One hostname per line. Prefix with <code>*.</code> to include subdomains.
+          Pinned tabs and Chrome's own pages are always kept.
+        </p>
+      </section>
+
+      <div class="actions">
+        <button id="save" class="primary">Save</button>
+        <button id="reapNow">Reap now</button>
+        <span id="status" role="status" aria-live="polite"></span>
+      </div>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
