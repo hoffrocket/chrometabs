@@ -1,17 +1,27 @@
 # Tab Reaper
 
-A Chrome extension that automatically closes tabs you haven't used for a
-configurable amount of time.
+A Chrome extension that automatically closes tabs you haven't used in a while.
+Browser tab hygiene, on a timer: the tabs you actually use stay, the ones you
+opened yesterday and forgot don't.
 
-The extension itself uses **no third-party libraries** — only the official
-`chrome.*` extension APIs. Playwright appears solely as a `devDependency` for
-driving a real browser in the tests; nothing in `extension/` imports it.
+The extension uses **no third-party libraries** — only the official `chrome.*`
+extension APIs. Playwright appears solely as a `devDependency` for driving a
+real browser in the tests; nothing under `extension/` imports it.
+
+- [What it does](#what-it-does)
+- [Installing in your own Chrome](#installing-in-your-own-chrome)
+- [Settings](#settings)
+- [Development workflow](#development-workflow)
+- [Layout](#layout)
+- [Implementation notes](#implementation-notes)
 
 ## What it does
 
-A tab is closed when it has not been the active tab for longer than its idle
-threshold — the global timeout (**12 hours** by default), or a per-domain
-override if one matches. A tab is **kept** when it is:
+Every minute, the extension checks each open tab. A tab is closed when it has
+not been the active tab for longer than its idle threshold — the global timeout
+(**12 hours** by default), or a per-domain override if one matches.
+
+A tab is **kept** when it is:
 
 | Reason | Detail |
 | --- | --- |
@@ -22,16 +32,56 @@ override if one matches. A tab is **kept** when it is:
 | `not-idle-long-enough` | It's been used more recently than its threshold. |
 | `disabled` | The extension is switched off. |
 
-Tabs closed by a per-domain override report the reason `idle-by-rule` along
-with the pattern that matched, rather than a bare `idle`.
+Tabs closed by a per-domain override report `idle-by-rule` along with the
+pattern that matched, rather than a bare `idle`.
 
-Closed tabs are not logged anywhere — use Chrome's own **Reopen closed tab**
-(`⇧⌘T` / `Ctrl+Shift+T`) or History to get one back.
+**Closed tabs are not logged anywhere.** Recovery is Chrome's own **Reopen
+closed tab** (`⇧⌘T` / `Ctrl+Shift+T`) or History. Pinning is the only per-tab
+rescue, so pin anything you would be annoyed to lose.
+
+Requires Chrome 121 or newer.
+
+## Installing in your own Chrome
+
+The extension is not on the Web Store; install it unpacked.
+
+1. Open `chrome://extensions`.
+2. Turn on **Developer mode** (top-right toggle).
+3. Click **Load unpacked**.
+4. Select the **`extension/`** subfolder — not the repo root:
+
+   ```
+   <path-to-repo>/extension
+   ```
+
+Tab Reaper appears immediately and starts working with the 12-hour default. To
+reach the settings, click the puzzle-piece icon in the toolbar and pin **Tab
+Reaper**, then click its icon — or go to `chrome://extensions` → Tab Reaper →
+**Details** → **Extension options**.
+
+Things worth knowing about an unpacked install:
+
+- **Don't move or delete the folder.** Chrome reloads the extension from that
+  path on every startup; if it disappears, the extension errors out.
+- **After editing code**, press the ↻ reload button on the extension's card at
+  `chrome://extensions`.
+- **Settings live in `chrome.storage.sync`**, so they persist across reloads and
+  follow your Google account. Removing and re-adding the extension gives it a
+  new ID and a fresh, empty settings store.
+- Chrome may periodically warn about developer-mode extensions. That's normal
+  for any unpacked install.
+
+**Before trusting it with real tabs**, set the timeout to 2 minutes, open a few
+throwaway tabs, and watch it work — then set it back. With the 12-hour default
+you won't otherwise see anything happen until tomorrow.
+
+> **Why not a command-line install?** Chrome 151 stable removed the
+> `--load-extension` switch, so scripted side-loading no longer works in stable
+> Chrome. **Load unpacked** is unaffected. For scripted/automated loading, see
+> [`npm run chrome`](#running-it-in-a-disposable-chrome), which uses the Chrome
+> for Testing build.
 
 ## Settings
-
-Open the options page (click the toolbar icon, or `chrome://extensions` →
-Tab Reaper → Details → Extension options):
 
 - **Automatically close idle tabs** — master on/off switch.
 - **Idle timeout** — minutes of non-use before a tab is closed. Default 720
@@ -45,51 +95,86 @@ Tab Reaper → Details → Extension options):
   ```
 
 - **Custom timeouts per site** — one `hostname = minutes` per line, overriding
-  the global timeout for matching tabs. Patterns use the same `*.` syntax:
+  the global timeout for matching tabs. Same `*.` syntax:
 
   ```
   *.zoom.us = 10           # stale meeting tabs go quickly
   docs.google.com = 2880   # keep docs around for 2 days
   ```
 
-  The rule can be shorter *or* longer than the global timeout. Lines that
-  aren't `hostname = minutes` (or have a non-positive number) are ignored, and
-  the hint under the box shows exactly how your input was understood, so a typo
+  A rule can be shorter *or* longer than the global timeout. Lines that aren't
+  `hostname = minutes` (or that have a non-positive number) are ignored, and the
+  hint under the box shows exactly how your input was understood — so a typo
   that drops a line is visible immediately.
 
-- **Reap now** — run a sweep immediately, instead of waiting for the next tick.
+- **Reap now** — sweep immediately instead of waiting for the next tick.
 
 ### How the two lists interact
 
-1. **Never-close wins.** A host in the never-close list is kept even if a
-   custom timeout also matches it.
-2. **Most specific rule wins.** An exact hostname beats a wildcard, and a
-   deeper wildcard beats a shallower one — so with `*.google.com = 60` and
+1. **Never-close wins.** A host in the never-close list is kept even if a custom
+   timeout also matches it.
+2. **Most specific rule wins.** An exact hostname beats a wildcard, and a deeper
+   wildcard beats a shallower one — so with `*.google.com = 60` and
    `docs.google.com = 5`, docs uses 5 minutes and `mail.google.com` uses 60.
 3. **Otherwise the global timeout applies.**
 
-## Trying it by hand
+## Development workflow
+
+### Setup
 
 ```sh
 npm install
-npx playwright install chromium   # one-time browser download
+npx playwright install chromium   # one-time browser download (~95 MB)
+```
+
+The download is Chrome for Testing, used by both the test suite and
+`npm run chrome`. Nothing in the shipped extension depends on it.
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `npm test` | Unit + browser tests. |
+| `npm run test:unit` | Pure logic via `node:test`. No browser, milliseconds. |
+| `npm run test:browser` | Playwright tests against a real Chrome. |
+| `npm run chrome` | Opens a disposable Chrome with the extension loaded. |
+| `node scripts/smoke.js` | One end-to-end pass; `--screenshot out.png` to capture the options page. |
+
+### The loop
+
+Most changes are to reaping behaviour, which lives in
+`extension/lib/reaper.js`. That module deliberately touches **no `chrome.*`
+API**, so the fast path is:
+
+1. Add or change a case in `test/unit/reaper.test.js`.
+2. Edit `extension/lib/reaper.js`.
+3. `npm run test:unit` — sub-second feedback.
+
+Once the logic is right, confirm it behaves the same when wired to the real
+browser APIs: add a case to `test/browser/` and run `npm run test:browser`.
+Anything touching `background.js` (tab events, alarms, storage) needs a browser
+test, because none of that can be exercised in plain Node.
+
+When you fix a bug, add the test that fails without the fix — then verify it
+really fails by reverting the fix temporarily. The activity-map race in
+[Implementation notes](#implementation-notes) was found that way, and its
+regression test only catches 1-of-8 recorded tabs when the fix is removed.
+
+### Running it in a disposable Chrome
+
+```sh
 npm run chrome
 ```
 
-This opens a **separate, disposable Chrome** with the extension side-loaded and
-its own profile in `.chrome-dev-profile/` — your everyday browser and its tabs
-are never touched. Delete that directory to reset.
+This opens a **separate Chrome** with the extension side-loaded and its own
+profile in `.chrome-dev-profile/` (gitignored) — your everyday browser and its
+tabs are never touched. Delete that directory to reset to a clean state. Set
+`CHROME_PATH` to use a different binary.
 
-> **Note on Chrome versions:** Chrome 151 stable removed the
-> `--load-extension` command-line switch, so scripted side-loading only works
-> in the Chrome for Testing build that `npx playwright install chromium`
-> downloads. That is what `npm run chrome` uses. To try it in your *real*
-> Chrome, load `extension/` manually via `chrome://extensions` → **Developer
-> mode** → **Load unpacked**. Set `CHROME_PATH` to override the binary.
+### Testing a 12-hour timeout without waiting 12 hours
 
-Testing a 12-hour timeout by waiting half a day is no fun. Either set the
-timeout to 1 minute, or backdate a tab from the service worker console
-(`chrome://extensions` → Tab Reaper → **service worker**):
+Either set the timeout to 1 minute, or backdate tabs from the service worker
+console (`chrome://extensions` → Tab Reaper → **service worker**):
 
 ```js
 // Make every inactive tab look an hour old, then sweep.
@@ -101,54 +186,71 @@ await self.__tabReaper.updateActivity(async (activity) => {
 await self.__tabReaper.sweep();
 ```
 
-## Tests
+`self.__tabReaper` exposes `sweep`, `readActivity`, `readSettings`, and
+`updateActivity` for exactly this kind of poking; the test fixtures use the same
+handle. Route timestamp edits through `updateActivity` rather than writing
+`chrome.storage.session` directly, or a pending tab event may clobber them.
 
-```sh
-npm test            # unit + browser
-npm run test:unit   # pure logic, node:test, no browser
-npm run test:browser
-node scripts/smoke.js --screenshot /tmp/options.png
-```
+### How the tests are organized
 
-- `test/unit/` exercises `extension/lib/reaper.js`, which holds all the
-  reaping decisions and touches no `chrome.*` API — so the threshold, allowlist,
-  per-domain rules and exemptions are testable in plain Node.
-- `test/browser/` loads the real extension into a real Chrome via Playwright
-  and drives it through the actual `chrome.tabs` API: opening tabs, pinning,
-  activating, sweeping, and asserting which tabs survive. `test/browser/fixtures.js`
-  provides the `ext` helper that runs code inside the extension's own context.
-- `scripts/smoke.js` is a single end-to-end pass, handy for a screenshot.
+- **`test/unit/`** (20 tests) exercises `extension/lib/reaper.js`: thresholds,
+  allowlist matching, rule parsing and specificity, exemptions. Plain Node, no
+  browser.
+- **`test/browser/`** (18 tests) loads the real extension into a real Chrome and
+  drives it through the actual `chrome.tabs` API — opening tabs, pinning,
+  activating, sweeping — then asserts which tabs survived.
+  `test/browser/fixtures.js` provides the `ext` fixture, whose helpers run
+  inside the extension's own privileged context.
+  - `idle-close.spec.js` — reaping behaviour and exemptions.
+  - `options.spec.js` — the settings UI, and that what it saves reaches the
+    reaper.
+- **`scripts/smoke.js`** is a single end-to-end pass, useful as a quick sanity
+  check and for capturing a screenshot.
+
+Browser tests run with `workers: 1`; each drives a real browser with a
+persistent profile and they must not race over the same user-data dir.
 
 ## Layout
 
 ```
-extension/
-  manifest.json     MV3 manifest — permissions: tabs, storage, alarms
-  background.js     service worker: tracks tab activity, runs sweeps
-  lib/reaper.js     pure decision logic (no chrome.* — unit tested)
+extension/                MV3 extension — chrome.* APIs only
+  manifest.json           permissions: tabs, storage, alarms
+  background.js           service worker: tracks activity, runs sweeps
+  lib/reaper.js           pure decision logic (no chrome.* — unit tested)
   options.html/.css/.js   settings UI
 test/
-  unit/             node:test over lib/reaper.js
-  browser/          Playwright tests driving real Chrome
+  unit/                   node:test over lib/reaper.js
+  browser/                Playwright tests driving real Chrome
+    fixtures.js           the `ext` fixture and extension-context helpers
 scripts/
-  launch-chrome.js  disposable Chrome for manual poking
-  smoke.js          end-to-end check + screenshot
+  launch-chrome.js        disposable Chrome for manual poking
+  smoke.js                end-to-end check + screenshot
+playwright.config.js
 ```
 
 ## Implementation notes
 
+- **Decision logic is isolated from the `chrome.*` APIs.** `lib/reaper.js`
+  decides what to close from plain data (tabs, timestamps, settings) and returns
+  a *reason* for every tab rather than a boolean. That keeps the rules unit
+  testable and makes sweeps self-explaining.
 - **Activity lives in `chrome.storage.session`, not a variable.** MV3 service
-  workers are killed and restarted at Chrome's discretion, so an in-memory
-  `Map` of tab timestamps would vanish. `storage.session` is cleared on browser
-  restart, which is the lifetime we want anyway.
+  workers are killed and restarted at Chrome's discretion, so an in-memory `Map`
+  of tab timestamps would vanish. `storage.session` clears on browser restart,
+  which is the lifetime we want anyway.
 - **Updates to the activity map are serialized.** Each update is a
-  read-modify-write against storage, and tab events arrive in bursts (opening
-  ten tabs fires ten `onCreated` events). Unserialized, later writes clobber
-  earlier ones with a stale copy of the map — dropping timestamps so tabs look
-  either immortal or instantly stale. `updateActivity()` funnels all mutations
-  through one promise chain; `test/browser/idle-close.spec.js` has a regression
-  test that fails without it.
+  read-modify-write against storage, and tab events arrive in bursts (opening ten
+  tabs fires ten `onCreated` events). Unserialized, later writes clobber earlier
+  ones with a stale copy of the map, dropping timestamps so tabs look either
+  immortal or instantly stale. `updateActivity()` funnels all mutations through
+  one promise chain; `idle-close.spec.js` has a regression test that fails
+  without it.
 - **Tabs with no recorded timestamp are treated as just-used**, so a freshly
   installed or restarted extension never mass-closes long-standing tabs.
-- **A `chrome.alarms` tick drives sweeps**, not `setTimeout` — timers do not
-  survive service-worker eviction.
+- **A `chrome.alarms` tick drives sweeps**, not `setTimeout` — timers don't
+  survive service-worker eviction. The alarm is (re)created on install, on
+  startup, and on every worker start, since an evicted worker restarts without
+  firing either lifecycle event.
+- **Malformed rule lines are dropped, not fatal.** One typo shouldn't disable
+  every rule — so the options page reports what it understood and how many lines
+  it ignored.
