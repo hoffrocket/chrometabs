@@ -55,7 +55,16 @@ try {
   );
 
   await worker.evaluate(() =>
-    chrome.storage.sync.set({ enabled: true, idleMinutes: 30, allowlist: ['keep.test'] }),
+    chrome.storage.sync.set({
+      enabled: true,
+      idleMinutes: 30,
+      allowlist: ['keep.test'],
+      // zoom closes sooner than the global timeout, slow.test much later.
+      rules: [
+        { pattern: '*.zoom.us', minutes: 10 },
+        { pattern: 'slow.test', minutes: 10_000 },
+      ],
+    }),
   );
 
   const ids = await worker.evaluate(async () => {
@@ -63,9 +72,11 @@ try {
       chrome.tabs.create({ url: 'https://stale.test/', active: false }),
       chrome.tabs.create({ url: 'https://keep.test/', active: false }),
       chrome.tabs.create({ url: 'https://pinned.test/', active: false, pinned: true }),
+      chrome.tabs.create({ url: 'https://call.zoom.us/j/1', active: false }),
+      chrome.tabs.create({ url: 'https://slow.test/', active: false }),
     ]);
-    const [stale, keep, pinned] = made.map((t) => t.id);
-    return { stale, keep, pinned };
+    const [stale, keep, pinned, zoom, slow] = made.map((t) => t.id);
+    return { stale, keep, pinned, zoom, slow };
   });
 
   // chrome.tabs.onCreated writes a fresh timestamp asynchronously; let those
@@ -82,9 +93,12 @@ try {
   const closed = result.closed;
   console.log(`Sweep closed ${closed.length} tab(s).`);
 
+  // Every tab was backdated an hour, against a 30-minute global timeout.
   if (!closed.includes(ids.stale)) fail('the stale tab was not closed');
   if (closed.includes(ids.keep)) fail('an allowlisted tab was closed');
   if (closed.includes(ids.pinned)) fail('a pinned tab was closed');
+  if (!closed.includes(ids.zoom)) fail('a tab past its 10-minute rule was not closed');
+  if (closed.includes(ids.slow)) fail('a tab within its 10000-minute rule was closed');
   if (process.exitCode !== 1) console.log('Reaping behaviour correct in real Chrome.');
 
   if (shotPath) {

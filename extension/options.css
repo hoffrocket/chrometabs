@@ -96,7 +96,17 @@ code {
   padding: 0 4px;
 }
 
-.actions { display: flex; align-items: center; gap: 10px; }
+/* With three cards the page is taller than a small extension window, so keep
+   the action bar reachable without scrolling to the bottom. */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0;
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+}
 
 button {
   font: inherit;

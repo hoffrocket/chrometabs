@@ -1,4 +1,10 @@
-import { DEFAULT_SETTINGS, normalizeSettings, parseAllowlist } from './lib/reaper.js';
+import {
+  DEFAULT_SETTINGS,
+  formatRules,
+  normalizeSettings,
+  parseAllowlist,
+  parseRules,
+} from './lib/reaper.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,6 +27,26 @@ function renderHint() {
   $('idleHint').textContent = pretty ? `That's about ${pretty} of not looking at a tab.` : '';
 }
 
+/** Echo back how the rules textarea was actually understood, so a typo that
+ *  drops a line is visible before the user navigates away. */
+function renderRulesHint() {
+  const raw = $('rules').value;
+  const written = raw.split('\n').filter((line) => line.trim()).length;
+  const rules = parseRules(raw);
+
+  if (written === 0) {
+    $('rulesHint').textContent = '';
+    return;
+  }
+  const summary = rules
+    .map((rule) => `${rule.pattern} after ${describeDuration(rule.minutes)}`)
+    .join(', ');
+  const dropped = written - rules.length;
+  $('rulesHint').textContent =
+    (summary ? `Understood: ${summary}.` : '') +
+    (dropped > 0 ? ` ${dropped} line${dropped === 1 ? '' : 's'} ignored — use "hostname = minutes".` : '');
+}
+
 let statusTimer;
 function setStatus(text) {
   $('status').textContent = text;
@@ -34,7 +60,9 @@ async function load() {
   $('enabled').checked = settings.enabled;
   $('idleMinutes').value = settings.idleMinutes;
   $('allowlist').value = settings.allowlist.join('\n');
+  $('rules').value = formatRules(settings.rules);
   renderHint();
+  renderRulesHint();
 }
 
 async function save() {
@@ -47,12 +75,15 @@ async function save() {
     enabled: $('enabled').checked,
     idleMinutes: Math.floor(minutes),
     allowlist: parseAllowlist($('allowlist').value),
+    rules: parseRules($('rules').value),
   };
   await chrome.storage.sync.set(settings);
   // Reflect any normalization (deduped hosts, floored minutes) back into the form.
   $('idleMinutes').value = settings.idleMinutes;
   $('allowlist').value = settings.allowlist.join('\n');
+  $('rules').value = formatRules(settings.rules);
   renderHint();
+  renderRulesHint();
   setStatus('Saved.');
 }
 
@@ -66,5 +97,6 @@ async function reapNow() {
 $('save').addEventListener('click', save);
 $('reapNow').addEventListener('click', reapNow);
 $('idleMinutes').addEventListener('input', renderHint);
+$('rules').addEventListener('input', renderRulesHint);
 
 load();

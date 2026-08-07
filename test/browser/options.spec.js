@@ -9,7 +9,7 @@ test('options page saves settings and the service worker reads them back', async
   await page.goto(`chrome-extension://${extensionId}/options.html`);
 
   await expect(page.locator('#enabled')).toBeChecked();
-  await expect(page.locator('#idleMinutes')).toHaveValue('60');
+  await expect(page.locator('#idleMinutes')).toHaveValue('720');
 
   await page.fill('#idleMinutes', '15');
   await page.fill('#allowlist', 'Example.com\n*.google.com\nexample.com');
@@ -24,6 +24,69 @@ test('options page saves settings and the service worker reads them back', async
     idleMinutes: 15,
     allowlist: ['example.com', '*.google.com'],
   });
+});
+
+test('the shipped default timeout is 12 hours', async ({ context, extensionId }) => {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+  await expect(page.locator('#idleMinutes')).toHaveValue('720');
+  await expect(page.locator('#idleHint')).toContainText('12 hours');
+});
+
+test('options page saves per-domain rules and echoes how they parsed', async ({
+  context,
+  extensionId,
+  ext,
+}) => {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+  await page.fill('#rules', '*.zoom.us = 10\ndocs.google.com: 2880\ngarbage line');
+  await expect(page.locator('#rulesHint')).toContainText('*.zoom.us after 10 minutes');
+  await expect(page.locator('#rulesHint')).toContainText('docs.google.com after 2 days');
+  await expect(page.locator('#rulesHint')).toContainText('1 line ignored');
+
+  await page.click('#save');
+  await expect(page.locator('#status')).toHaveText('Saved.');
+
+  // The invalid line is dropped and the rest normalized to `pattern = minutes`.
+  await expect(page.locator('#rules')).toHaveValue('*.zoom.us = 10\ndocs.google.com = 2880');
+  expect(await ext.getSettings()).toMatchObject({
+    rules: [
+      { pattern: '*.zoom.us', minutes: 10 },
+      { pattern: 'docs.google.com', minutes: 2880 },
+    ],
+  });
+});
+
+test('per-domain rules survive a reload and reach the reaper', async ({
+  context,
+  extensionId,
+  ext,
+}) => {
+  await context.route(/^https?:\/\//, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<title>stub</title>' }),
+  );
+
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+  await page.fill('#idleMinutes', '720');
+  await page.fill('#rules', '*.zoom.us = 10');
+  await page.click('#save');
+  await expect(page.locator('#status')).toHaveText('Saved.');
+
+  await page.reload();
+  await expect(page.locator('#rules')).toHaveValue('*.zoom.us = 10');
+
+  // A rule entered through the UI actually governs a sweep.
+  const zoomId = await ext.openTab('https://call.zoom.us/j/9');
+  const otherId = await ext.openTab('https://elsewhere.test/');
+  await ext.markAllIdle(30 * 60_000);
+
+  const result = await ext.sweep();
+  expect(result.closed).toContain(zoomId);
+  expect(result.closed).not.toContain(otherId);
 });
 
 test('options page rejects a non-positive interval', async ({ context, extensionId, ext }) => {

@@ -9,17 +9,21 @@ driving a real browser in the tests; nothing in `extension/` imports it.
 
 ## What it does
 
-A tab is closed when it has not been the active tab for longer than the
-configured idle period. A tab is **kept** when it is:
+A tab is closed when it has not been the active tab for longer than its idle
+threshold — the global timeout (**12 hours** by default), or a per-domain
+override if one matches. A tab is **kept** when it is:
 
 | Reason | Detail |
 | --- | --- |
 | `active` | It's the tab you're looking at in its window. |
 | `pinned` | Pinning is the "keep this forever" gesture. |
 | `internal-page` | Only `http:` / `https:` tabs are reaped, so `chrome://`, `about:`, and extension pages are safe. |
-| `allowlisted` | Its hostname matches your allowlist. |
-| `not-idle-long-enough` | It's been used more recently than the threshold. |
+| `allowlisted` | Its hostname matches your never-close list. |
+| `not-idle-long-enough` | It's been used more recently than its threshold. |
 | `disabled` | The extension is switched off. |
+
+Tabs closed by a per-domain override report the reason `idle-by-rule` along
+with the pattern that matched, rather than a bare `idle`.
 
 Closed tabs are not logged anywhere — use Chrome's own **Reopen closed tab**
 (`⇧⌘T` / `Ctrl+Shift+T`) or History to get one back.
@@ -30,7 +34,8 @@ Open the options page (click the toolbar icon, or `chrome://extensions` →
 Tab Reaper → Details → Extension options):
 
 - **Automatically close idle tabs** — master on/off switch.
-- **Idle timeout** — minutes of non-use before a tab is closed. Default 60.
+- **Idle timeout** — minutes of non-use before a tab is closed. Default 720
+  (12 hours).
 - **Never close these sites** — one hostname per line. Prefix with `*.` to
   include subdomains:
 
@@ -39,7 +44,29 @@ Tab Reaper → Details → Extension options):
   *.google.com       # google.com and any subdomain
   ```
 
+- **Custom timeouts per site** — one `hostname = minutes` per line, overriding
+  the global timeout for matching tabs. Patterns use the same `*.` syntax:
+
+  ```
+  *.zoom.us = 10           # stale meeting tabs go quickly
+  docs.google.com = 2880   # keep docs around for 2 days
+  ```
+
+  The rule can be shorter *or* longer than the global timeout. Lines that
+  aren't `hostname = minutes` (or have a non-positive number) are ignored, and
+  the hint under the box shows exactly how your input was understood, so a typo
+  that drops a line is visible immediately.
+
 - **Reap now** — run a sweep immediately, instead of waiting for the next tick.
+
+### How the two lists interact
+
+1. **Never-close wins.** A host in the never-close list is kept even if a
+   custom timeout also matches it.
+2. **Most specific rule wins.** An exact hostname beats a wildcard, and a
+   deeper wildcard beats a shallower one — so with `*.google.com = 60` and
+   `docs.google.com = 5`, docs uses 5 minutes and `mail.google.com` uses 60.
+3. **Otherwise the global timeout applies.**
 
 ## Trying it by hand
 
@@ -60,7 +87,7 @@ are never touched. Delete that directory to reset.
 > Chrome, load `extension/` manually via `chrome://extensions` → **Developer
 > mode** → **Load unpacked**. Set `CHROME_PATH` to override the binary.
 
-Testing a 60-minute timeout by waiting an hour is no fun. Either set the
+Testing a 12-hour timeout by waiting half a day is no fun. Either set the
 timeout to 1 minute, or backdate a tab from the service worker console
 (`chrome://extensions` → Tab Reaper → **service worker**):
 
@@ -84,8 +111,8 @@ node scripts/smoke.js --screenshot /tmp/options.png
 ```
 
 - `test/unit/` exercises `extension/lib/reaper.js`, which holds all the
-  reaping decisions and touches no `chrome.*` API — so the threshold, allowlist
-  and exemption rules are testable in plain Node.
+  reaping decisions and touches no `chrome.*` API — so the threshold, allowlist,
+  per-domain rules and exemptions are testable in plain Node.
 - `test/browser/` loads the real extension into a real Chrome via Playwright
   and drives it through the actual `chrome.tabs` API: opening tabs, pinning,
   activating, sweeping, and asserting which tabs survive. `test/browser/fixtures.js`

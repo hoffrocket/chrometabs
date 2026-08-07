@@ -94,6 +94,64 @@ test('never closes an allowlisted host, including via wildcard', async ({ ext })
   expect(result.closed).toContain(otherId);
 });
 
+test('a per-domain rule closes a site sooner than the global timeout', async ({ ext }) => {
+  // Global 12h default; zoom overridden to 10 minutes.
+  await ext.setSettings({
+    enabled: true,
+    idleMinutes: 720,
+    allowlist: [],
+    rules: [{ pattern: '*.zoom.us', minutes: 10 }],
+  });
+
+  const zoomId = await ext.openTab('https://call.zoom.us/j/123');
+  const otherId = await ext.openTab('https://example.test/');
+  await ext.markAllIdle(30 * MINUTE);
+
+  const result = await ext.sweep();
+
+  expect(result.closed).toContain(zoomId);
+  expect(result.closed).not.toContain(otherId);
+});
+
+test('a per-domain rule can also keep a tab longer than the global timeout', async ({ ext }) => {
+  await ext.setSettings({
+    enabled: true,
+    idleMinutes: 5,
+    allowlist: [],
+    rules: [{ pattern: 'longlived.test', minutes: 10_000 }],
+  });
+
+  const keptId = await ext.openTab('https://longlived.test/');
+  const reapedId = await ext.openTab('https://ordinary.test/');
+  await ext.markAllIdle(60 * MINUTE);
+
+  const result = await ext.sweep();
+
+  expect(result.closed).not.toContain(keptId);
+  expect(result.closed).toContain(reapedId);
+});
+
+test('the most specific rule wins for overlapping patterns', async ({ ext }) => {
+  await ext.setSettings({
+    enabled: true,
+    idleMinutes: 720,
+    allowlist: [],
+    rules: [
+      { pattern: '*.google.test', minutes: 10 },
+      { pattern: 'docs.google.test', minutes: 10_000 },
+    ],
+  });
+
+  const docsId = await ext.openTab('https://docs.google.test/d/1');
+  const mailId = await ext.openTab('https://mail.google.test/inbox');
+  await ext.markAllIdle(60 * MINUTE);
+
+  const result = await ext.sweep();
+
+  expect(result.closed, 'docs has an exact-host rule of 10000 minutes').not.toContain(docsId);
+  expect(result.closed, 'mail falls under the 10-minute wildcard').toContain(mailId);
+});
+
 test('closes nothing while disabled', async ({ ext }) => {
   await ext.setSettings({ enabled: false, idleMinutes: 1, allowlist: [] });
 

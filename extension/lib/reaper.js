@@ -7,8 +7,9 @@
 
 export const DEFAULT_SETTINGS = {
   enabled: true,
-  idleMinutes: 60,
+  idleMinutes: 12 * 60,
   allowlist: [],
+  rules: [],
 };
 
 /** Schemes we are willing to reap. Internal pages (chrome://, about:, the
@@ -22,7 +23,71 @@ export function normalizeSettings(raw) {
     enabled: settings.enabled !== false,
     idleMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_SETTINGS.idleMinutes,
     allowlist: parseAllowlist(settings.allowlist),
+    rules: parseRules(settings.rules),
   };
+}
+
+/**
+ * Per-domain overrides of the global idle timeout, e.g. close `*.zoom.us`
+ * after 10 minutes while everything else waits 12 hours.
+ *
+ * Accepts an array of `{pattern, minutes}` objects, or a newline/comma
+ * separated string of `pattern = minutes` lines (which is what the options
+ * page textarea produces):
+ *
+ *   *.zoom.us = 10
+ *   docs.google.com = 2880
+ *
+ * Invalid lines are dropped rather than throwing, so one typo in the textarea
+ * cannot break every rule.
+ */
+export function parseRules(value) {
+  const entries = Array.isArray(value)
+    ? value
+    : String(value ?? '')
+        .split(/[\n,]/)
+        .map((line) => {
+          const match = /^([^=:]+)[=:](.*)$/.exec(line);
+          return match ? { pattern: match[1], minutes: match[2] } : null;
+        })
+        .filter(Boolean);
+
+  const byPattern = new Map();
+  for (const entry of entries) {
+    const [pattern] = parseAllowlist([entry?.pattern ?? '']);
+    const minutes = Number(String(entry?.minutes ?? '').trim());
+    if (!pattern || !Number.isFinite(minutes) || minutes <= 0) continue;
+    // Last definition of a pattern wins, matching the allowlist's dedupe.
+    byPattern.set(pattern, { pattern, minutes: Math.floor(minutes) });
+  }
+  return [...byPattern.values()];
+}
+
+/** Serialize rules back into the `pattern = minutes` textarea format. */
+export function formatRules(rules) {
+  return rules.map(({ pattern, minutes }) => `${pattern} = ${minutes}`).join('\n');
+}
+
+/**
+ * How specific a host pattern is. An exact host beats a wildcard, and a
+ * deeper wildcard beats a shallower one, so `*.us.zoom.us` wins over
+ * `*.zoom.us` and `docs.google.com` wins over `*.google.com`.
+ */
+function specificity(pattern) {
+  const labels = pattern.replace(/^\*\./, '').split('.').length;
+  return pattern.startsWith('*.') ? labels : labels + 100;
+}
+
+/**
+ * The most specific rule matching this URL, or null.
+ */
+export function matchRule(url, rules) {
+  let best = null;
+  for (const rule of rules) {
+    if (!isAllowlisted(url, [rule.pattern])) continue;
+    if (!best || specificity(rule.pattern) > specificity(best.pattern)) best = rule;
+  }
+  return best;
 }
 
 /**
@@ -80,16 +145,29 @@ function isReapableUrl(url) {
  */
 export function evaluateTab(tab, lastActiveAt, now, settings) {
   const idleMs = Math.max(0, now - (lastActiveAt ?? now));
-  const thresholdMs = settings.idleMinutes * 60_000;
-  const keep = (reason) => ({ tabId: tab.id, close: false, reason, idleMs });
 
-  if (tab.active) return keep('active');
-  if (tab.pinned) return keep('pinned');
-  if (!isReapableUrl(tab.url)) return keep('internal-page');
-  if (isAllowlisted(tab.url, settings.allowlist)) return keep('allowlisted');
-  if (idleMs < thresholdMs) return keep('not-idle-long-enough');
+  // The allowlist is checked before rules, so a never-close entry always wins
+  // over a custom timeout for the same host.
+  const rule = matchRule(tab.url, settings.rules);
+  const thresholdMinutes = rule ? rule.minutes : settings.idleMinutes;
+  const thresholdMs = thresholdMinutes * 60_000;
 
-  return { tabId: tab.id, close: true, reason: 'idle', idleMs };
+  const verdict = (close, reason) => ({
+    tabId: tab.id,
+    close,
+    reason,
+    idleMs,
+    thresholdMinutes,
+    matchedRule: rule ? rule.pattern : null,
+  });
+
+  if (tab.active) return verdict(false, 'active');
+  if (tab.pinned) return verdict(false, 'pinned');
+  if (!isReapableUrl(tab.url)) return verdict(false, 'internal-page');
+  if (isAllowlisted(tab.url, settings.allowlist)) return verdict(false, 'allowlisted');
+  if (idleMs < thresholdMs) return verdict(false, 'not-idle-long-enough');
+
+  return verdict(true, rule ? 'idle-by-rule' : 'idle');
 }
 
 /**

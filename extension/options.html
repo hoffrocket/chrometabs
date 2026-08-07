@@ -28,13 +28,28 @@
       <section class="card">
         <label class="row column" for="allowlist">
           <span>Never close these sites</span>
-          <textarea id="allowlist" rows="6" spellcheck="false"
+          <textarea id="allowlist" rows="5" spellcheck="false"
             placeholder="example.com&#10;*.google.com"></textarea>
         </label>
         <p class="hint">
           One hostname per line. Prefix with <code>*.</code> to include subdomains.
           Pinned tabs and Chrome's own pages are always kept.
         </p>
+      </section>
+
+      <section class="card">
+        <label class="row column" for="rules">
+          <span>Custom timeouts per site</span>
+          <textarea id="rules" rows="5" spellcheck="false"
+            placeholder="*.zoom.us = 10&#10;docs.google.com = 2880"></textarea>
+        </label>
+        <p class="hint">
+          One <code>hostname = minutes</code> per line, overriding the timeout above.
+          The most specific match wins, so <code>docs.google.com</code> beats
+          <code>*.google.com</code>. Anything in the never-close list above takes
+          priority over a custom timeout.
+        </p>
+        <p class="hint" id="rulesHint"></p>
       </section>
 
       <div class="actions">
