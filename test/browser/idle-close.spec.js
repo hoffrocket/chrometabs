@@ -30,7 +30,7 @@ test('closes a tab that has been idle past the threshold', async ({ ext }) => {
   await ext.markIdle(staleId, 31 * MINUTE);
   const result = await ext.sweep();
 
-  expect(result.closed).toContain(staleId);
+  expect(result.closed, result.why).toContain(staleId);
   const remaining = await ext.tabs();
   expect(remaining.map((t) => t.id)).not.toContain(staleId);
 });
@@ -71,7 +71,7 @@ test('never closes a pinned tab', async ({ ext }) => {
   const result = await ext.sweep();
 
   expect(result.closed).not.toContain(pinnedId);
-  expect(result.closed).toContain(normalId);
+  expect(result.closed, result.why).toContain(normalId);
   expect((await ext.tabs()).map((t) => t.id)).toContain(pinnedId);
 });
 
@@ -91,7 +91,7 @@ test('never closes an allowlisted host, including via wildcard', async ({ ext })
 
   expect(result.closed).not.toContain(exactId);
   expect(result.closed).not.toContain(subId);
-  expect(result.closed).toContain(otherId);
+  expect(result.closed, result.why).toContain(otherId);
 });
 
 test('a per-domain rule closes a site sooner than the global timeout', async ({ ext }) => {
@@ -109,7 +109,7 @@ test('a per-domain rule closes a site sooner than the global timeout', async ({ 
 
   const result = await ext.sweep();
 
-  expect(result.closed).toContain(zoomId);
+  expect(result.closed, result.why).toContain(zoomId);
   expect(result.closed).not.toContain(otherId);
 });
 
@@ -128,7 +128,7 @@ test('a per-domain rule can also keep a tab longer than the global timeout', asy
   const result = await ext.sweep();
 
   expect(result.closed).not.toContain(keptId);
-  expect(result.closed).toContain(reapedId);
+  expect(result.closed, result.why).toContain(reapedId);
 });
 
 test('the most specific rule wins for overlapping patterns', async ({ ext }) => {
@@ -149,7 +149,7 @@ test('the most specific rule wins for overlapping patterns', async ({ ext }) => 
   const result = await ext.sweep();
 
   expect(result.closed, 'docs has an exact-host rule of 10000 minutes').not.toContain(docsId);
-  expect(result.closed, 'mail falls under the 10-minute wildcard').toContain(mailId);
+  expect(result.closed, `mail falls under the 10-minute wildcard. ${result.why}`).toContain(mailId);
 });
 
 test('closes nothing while disabled', async ({ ext }) => {

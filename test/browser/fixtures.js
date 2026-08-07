@@ -100,10 +100,27 @@ export const test = base.extend({
         );
       },
 
-      /** Trigger a sweep and return its result. Calls the worker's own sweep()
-       *  directly, since a service worker does not receive its own messages. */
+      /**
+       * Trigger a sweep and return its result. Calls the worker's own sweep()
+       * directly, since a service worker does not receive its own messages.
+       *
+       * The result carries a `why` string summarizing the extension's own
+       * verdict for each surviving tab. A bare "expected [1234], received []"
+       * says nothing about *why* a tab survived, and these tests failed on CI
+       * for a reason (`internal-page`, from an uncommitted URL) that the
+       * verdicts would have named immediately.
+       */
       async sweep() {
-        return worker.evaluate(() => self.__tabReaper.sweep());
+        const result = await worker.evaluate(() => self.__tabReaper.sweep());
+        const why = (result.kept ?? [])
+          .map(
+            (v) =>
+              `#${v.tabId} ${v.reason}` +
+              ` idle=${Math.round(v.idleMs / 1000)}s/${v.thresholdMinutes}m` +
+              (v.matchedRule ? ` rule=${v.matchedRule}` : ''),
+          )
+          .join('  |  ');
+        return { ...result, why: `kept: ${why || '(nothing)'}` };
       },
 
       /** [{id, url, active, pinned}] for every open tab. */
@@ -137,19 +154,39 @@ export const test = base.extend({
           { url, pinned },
         );
 
+        // Wait for two separate things, both of which have bitten:
+        //
+        // 1. The extension has recorded the tab. onCreated writes the
+        //    timestamp asynchronously after tabs.create resolves, so a
+        //    markIdle queued before that write would be overwritten by it.
+        //
+        // 2. The tab's URL has committed to http(s). chrome.tabs.create
+        //    resolves while the tab is still on about:blank, and the reaper
+        //    only reaps http(s) tabs — so sweeping too early keeps the tab as
+        //    an `internal-page` and the test sees nothing closed.
         await expect
           .poll(
             () =>
-              worker.evaluate(
-                (id) => self.__tabReaper.readActivity().then((a) => a[String(id)] !== undefined),
-                tabId,
-              ),
-            { message: `extension never recorded tab ${tabId} (${url})` },
+              worker.evaluate(async (id) => {
+                const activity = await self.__tabReaper.readActivity();
+                const recorded = activity[String(id)] !== undefined;
+                let tabUrl = '';
+                try {
+                  tabUrl = (await chrome.tabs.get(id)).url ?? '';
+                } catch {
+                  return 'tab-gone';
+                }
+                if (!recorded) return 'not-recorded';
+                if (!/^https?:/.test(tabUrl)) return `url-not-committed:${tabUrl || 'empty'}`;
+                return 'ready';
+              }, tabId),
+            { message: `tab ${tabId} (${url}) never became reapable`, timeout: 15_000 },
           )
-          .toBe(true);
+          .toBe('ready');
 
         return tabId;
       },
+
 
       async pin(tabId) {
         await worker.evaluate((tabId) => chrome.tabs.update(tabId, { pinned: true }), tabId);
