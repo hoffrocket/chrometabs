@@ -126,6 +126,15 @@ button {
 
 button:hover { border-color: var(--accent); }
 
+button:disabled { cursor: default; }
+button:disabled:hover { border-color: var(--border); }
+
+/* The form is inert until the stored settings have been read, so it can't be
+   edited in a window where the edit would be overwritten. In practice the read
+   is fast enough that this never renders. */
+body[data-loading] main { opacity: 0.6; }
+body[data-loading] :disabled { cursor: progress; }
+
 button.primary {
   background: var(--accent);
   border-color: var(--accent);

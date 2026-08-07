@@ -164,6 +164,12 @@ test('"Reap now" closes idle tabs from the options page', async ({
   await page.click('#save');
   await expect(page.locator('#status')).toHaveText('Saved.');
 
+  // Assert the value actually landed, not just that the page said "Saved.".
+  // This test used to flake because load() overwrote the typed 1 with the
+  // stored 720 and saved that instead, so the sweep found nothing idle while
+  // every visible signal looked right.
+  expect(await ext.getSettings()).toMatchObject({ idleMinutes: 1 });
+
   const doomed = await ext.openTab('https://doomed.test/');
   await ext.markIdle(doomed, 10 * 60_000);
 
@@ -171,4 +177,60 @@ test('"Reap now" closes idle tabs from the options page', async ({
 
   await expect(page.locator('#status')).toContainText('Closed 1 tab');
   expect((await ext.tabs()).map((t) => t.id)).not.toContain(doomed);
+});
+
+test('the form does not clobber input typed while settings are still loading', async ({
+  context,
+  extensionId,
+  ext,
+}) => {
+  // Stall the settings read so the load is unambiguously still in flight when
+  // the test interacts with the form. Without the disabled-until-loaded guard,
+  // a value typed in this window is silently overwritten when load() resolves
+  // — and then saved, so the user's edit is lost with no error.
+  //
+  // The read is issued immediately and only its *resolution* is delayed. If the
+  // stub instead deferred the read itself, it would observe storage as of
+  // t+1000ms — i.e. after this test's save — and render the new value anyway,
+  // masking the very clobbering being tested.
+  //
+  // `window.__readResolved` lets the assertions wait for the stalled read to
+  // land rather than sleeping — the damage only becomes visible at that moment.
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    window.__readResolved = false;
+    const original = chrome.storage.sync.get.bind(chrome.storage.sync);
+    chrome.storage.sync.get = (...args) => {
+      const inFlight = original(...args);
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          window.__readResolved = true;
+          resolve(inFlight);
+        }, 1000),
+      );
+    };
+  });
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+  // While loading, the controls are inert and marked as such.
+  await expect(page.locator('body')).toHaveAttribute('data-loading', '');
+  await expect(page.locator('#idleMinutes')).toBeDisabled();
+  await expect(page.locator('#save')).toBeDisabled();
+
+  // fill() waits for the field to become enabled, so this types *after* load().
+  await page.fill('#idleMinutes', '5');
+  await page.click('#save');
+  await expect(page.locator('#status')).toHaveText('Saved.');
+  expect(await ext.getSettings()).toMatchObject({ idleMinutes: 5 });
+
+  // The stalled read has now resolved, so a load() that ignored the edit would
+  // have overwritten the field with the pre-edit value by this point.
+  await page.waitForFunction(() => window.__readResolved === true);
+  await expect(page.locator('#idleMinutes')).toHaveValue('5');
+
+  // And the reverted field would be written straight back on the next save,
+  // which is how the edit gets lost for real.
+  await page.click('#save');
+  await expect(page.locator('#status')).toHaveText('Saved.');
+  expect(await ext.getSettings()).toMatchObject({ idleMinutes: 5 });
 });

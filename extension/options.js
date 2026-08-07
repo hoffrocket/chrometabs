@@ -54,6 +54,19 @@ function setStatus(text) {
   if (text) statusTimer = setTimeout(() => ($('status').textContent = ''), 4000);
 }
 
+const CONTROLS = ['enabled', 'idleMinutes', 'allowlist', 'rules', 'save', 'reapNow'];
+
+/**
+ * Populate the form from storage, then hand it over to the user.
+ *
+ * The controls are `disabled` in the HTML and only enabled here. Reading
+ * settings is asynchronous, and this function overwrites every field
+ * unconditionally — so anything typed before the read resolves would be
+ * silently discarded. On a fast machine the window is invisible; on a slow one
+ * it is wide enough to lose a real edit. (It also made a browser test flake:
+ * a typed timeout was clobbered back to the stored default, so the save wrote
+ * the wrong value while still reporting "Saved.")
+ */
 async function load() {
   const stored = await chrome.storage.sync.get(DEFAULT_SETTINGS);
   const settings = normalizeSettings(stored);
@@ -63,6 +76,8 @@ async function load() {
   $('rules').value = formatRules(settings.rules);
   renderHint();
   renderRulesHint();
+  for (const id of CONTROLS) $(id).disabled = false;
+  delete document.body.dataset.loading;
 }
 
 async function save() {
@@ -89,8 +104,21 @@ async function save() {
 
 async function reapNow() {
   setStatus('Reaping…');
-  const result = await chrome.runtime.sendMessage({ type: 'sweepNow' });
-  const count = result?.closed?.length ?? 0;
+  // Don't fold a failed round-trip into "nothing to close" — a dead service
+  // worker would otherwise report the same reassuring message as a real sweep
+  // that found no idle tabs.
+  let result;
+  try {
+    result = await chrome.runtime.sendMessage({ type: 'sweepNow' });
+  } catch (error) {
+    setStatus(`Could not reach the extension: ${error.message}`);
+    return;
+  }
+  if (!Array.isArray(result?.closed)) {
+    setStatus('Sweep failed — see the service worker console.');
+    return;
+  }
+  const count = result.closed.length;
   setStatus(count === 0 ? 'No idle tabs to close.' : `Closed ${count} tab${count === 1 ? '' : 's'}.`);
 }
 

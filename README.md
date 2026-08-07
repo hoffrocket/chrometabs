@@ -223,7 +223,7 @@ handle. Route timestamp edits through `updateActivity` rather than writing
 - **`test/unit/`** (20 tests) exercises `extension/lib/reaper.js`: thresholds,
   allowlist matching, rule parsing and specificity, exemptions. Plain Node, no
   browser.
-- **`test/browser/`** (18 tests) loads the real extension into a real Chrome and
+- **`test/browser/`** (20 tests) loads the real extension into a real Chrome and
   drives it through the actual `chrome.tabs` API — opening tabs, pinning,
   activating, sweeping — then asserts which tabs survived.
   `test/browser/fixtures.js` provides the `ext` fixture, whose helpers run
@@ -246,20 +246,32 @@ the Playwright report as an artifact.
 
 **Writing browser tests that don't flake.** The extension reacts to tab events
 asynchronously, so a test that sets something up and immediately sweeps is
-racing the extension. Two traps cost several red CI runs:
+racing the extension. Three traps cost several red CI runs:
 
 - `chrome.tabs.create` resolves while the tab is still on `about:blank`. Sweep
   in that window and the reaper sees a non-`http(s)` URL, keeps the tab as
   `internal-page`, and closes nothing.
 - A backdated timestamp can be overwritten by a tab event that lands *after*
   it, leaving the tab looking freshly used.
+- `page.goto` on the options page resolves before the settings read behind
+  `load()` has resolved. This one turned out to be an extension bug rather than
+  a test bug — see below.
 
-The `ext` fixture handles both: `openTab` waits for the extension to record the
-tab *and* for its URL to commit, and `markIdle`/`markAllIdle` poll until the
-backdating has actually stuck. Prefer those helpers over driving `chrome.tabs`
-directly. `sweep()` also returns a `why` string of the extension's own
-per-tab verdicts — attach it to closure assertions, because "expected [1234],
-received []" doesn't say *why* a tab survived.
+The `ext` fixture handles the first two: `openTab` waits for the extension to
+record the tab *and* for its URL to commit, and `markIdle`/`markAllIdle` poll
+until the backdating has actually stuck. Prefer those helpers over driving
+`chrome.tabs` directly. `sweep()` also returns a `why` string of the extension's
+own per-tab verdicts — attach it to closure assertions, because "expected
+[1234], received []" doesn't say *why* a tab survived.
+
+**Assert on state, not just on the UI's own claim.** The longest-lived flake
+here was a test that typed a 1-minute timeout, saw `Saved.`, and then found
+nothing to reap. The status text was true — a save *had* happened — but `load()`
+had overwritten the typed value with the stored default first, so 720 was what
+got saved. The page reported success for the wrong write. Two changes came out
+of it: the form is now `disabled` until the settings read resolves (so a real
+user's typing can't be discarded either), and the test asserts
+`ext.getSettings()` rather than trusting the status line.
 
 ## Layout
 
@@ -308,3 +320,7 @@ playwright.config.js
 - **Malformed rule lines are dropped, not fatal.** One typo shouldn't disable
   every rule — so the options page reports what it understood and how many lines
   it ignored.
+- **The options form is inert until it has loaded.** Populating it from
+  `storage.sync` is asynchronous and overwrites every field, so an editable
+  field before that point would silently discard whatever was typed into it —
+  and then save the stale value while still reporting success.
