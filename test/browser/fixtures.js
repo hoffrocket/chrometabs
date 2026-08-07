@@ -73,6 +73,27 @@ export const test = base.extend({
             }),
           { tabId, ageMs },
         );
+
+        // Confirm the backdating actually stuck. A tab event that lands after
+        // this update (a late onCreated/onActivated write, or a navigation
+        // still in flight) would reset the timestamp and the tab would silently
+        // look freshly used — which is exactly how "Reap now" flaked on CI.
+        await expect
+          .poll(
+            () =>
+              worker.evaluate(
+                ({ tabId, ageMs }) =>
+                  self.__tabReaper.readActivity().then((activity) => {
+                    const at = activity[String(tabId)];
+                    if (at === undefined) return -1;
+                    // Allow for the time this round-trip takes.
+                    return Date.now() - at >= ageMs * 0.9 ? 1 : 0;
+                  }),
+                { tabId, ageMs },
+              ),
+            { message: `tab ${tabId} did not stay backdated by ${ageMs}ms` },
+          )
+          .toBe(1);
       },
 
       /**
@@ -98,6 +119,25 @@ export const test = base.extend({
             }),
           ageMs,
         );
+
+        // As in markIdle: make sure no late tab event resets a timestamp.
+        // Active tabs are excluded, since sweep() re-stamps those by design.
+        await expect
+          .poll(
+            () =>
+              worker.evaluate(async (ageMs) => {
+                const tabs = await chrome.tabs.query({});
+                const activity = await self.__tabReaper.readActivity();
+                const stale = tabs.filter((tab) => {
+                  if (tab.active) return true;
+                  const at = activity[String(tab.id)];
+                  return at !== undefined && Date.now() - at >= ageMs * 0.9;
+                });
+                return stale.length === tabs.length;
+              }, ageMs),
+            { message: `not all tabs stayed backdated by ${ageMs}ms` },
+          )
+          .toBe(true);
       },
 
       /**

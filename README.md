@@ -1,5 +1,7 @@
 # Tab Reaper
 
+[![Tests](https://github.com/hoffrocket/chrometabs/actions/workflows/test.yml/badge.svg)](https://github.com/hoffrocket/chrometabs/actions/workflows/test.yml)
+
 A Chrome extension that automatically closes tabs you haven't used in a while.
 Browser tab hygiene, on a timer: the tabs you actually use stay, the ones you
 opened yesterday and forgot don't.
@@ -234,6 +236,30 @@ handle. Route timestamp edits through `updateActivity` rather than writing
 
 Browser tests run with `workers: 1`; each drives a real browser with a
 persistent profile and they must not race over the same user-data dir.
+
+### Continuous integration
+
+`.github/workflows/test.yml` runs both suites on every push and pull request.
+Unit tests go first — they need no browser, so a logic error fails in seconds.
+The Chrome download is cached on the lockfile hash, and a failing run uploads
+the Playwright report as an artifact.
+
+**Writing browser tests that don't flake.** The extension reacts to tab events
+asynchronously, so a test that sets something up and immediately sweeps is
+racing the extension. Two traps cost several red CI runs:
+
+- `chrome.tabs.create` resolves while the tab is still on `about:blank`. Sweep
+  in that window and the reaper sees a non-`http(s)` URL, keeps the tab as
+  `internal-page`, and closes nothing.
+- A backdated timestamp can be overwritten by a tab event that lands *after*
+  it, leaving the tab looking freshly used.
+
+The `ext` fixture handles both: `openTab` waits for the extension to record the
+tab *and* for its URL to commit, and `markIdle`/`markAllIdle` poll until the
+backdating has actually stuck. Prefer those helpers over driving `chrome.tabs`
+directly. `sweep()` also returns a `why` string of the extension's own
+per-tab verdicts — attach it to closure assertions, because "expected [1234],
+received []" doesn't say *why* a tab survived.
 
 ## Layout
 
