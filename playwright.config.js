@@ -8,6 +8,11 @@ export default defineConfig({
   fullyParallel: false,
   timeout: 60_000,
   expect: { timeout: 10_000 },
+  // CI runners are slower and noisier than a laptop; one retry distinguishes a
+  // genuine failure from runner timing without hiding a reproducible break.
+  retries: process.env.CI ? 1 : 0,
+  // Fail the build if a test is accidentally left focused with .only.
+  forbidOnly: Boolean(process.env.CI),
   reporter: [['list']],
   use: {
     trace: 'retain-on-failure',

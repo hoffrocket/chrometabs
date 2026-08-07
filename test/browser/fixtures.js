@@ -75,7 +75,17 @@ export const test = base.extend({
         );
       },
 
-      /** Mark every non-active tab as idle for `ageMs`. */
+      /**
+       * Mark every tab as idle for `ageMs`.
+       *
+       * This deliberately backdates *all* tabs, including the active one.
+       * Skipping the active tab made the helper depend on which tab happened
+       * to hold focus — opening pages and reloading shifts that around, so
+       * the tab a test wanted backdated sometimes wasn't, and the test failed
+       * intermittently. Backdating everything is safe because sweep() re-stamps
+       * active tabs before deciding anything, and the active tab is exempt
+       * regardless.
+       */
       async markAllIdle(ageMs) {
         await worker.evaluate(
           (ageMs) =>
@@ -83,7 +93,7 @@ export const test = base.extend({
               const tabs = await chrome.tabs.query({});
               const backdated = Date.now() - ageMs;
               for (const tab of tabs) {
-                if (!tab.active) activity[tab.id] = backdated;
+                activity[tab.id] = backdated;
               }
             }),
           ageMs,
@@ -109,13 +119,36 @@ export const test = base.extend({
         });
       },
 
-      /** Open a tab via the chrome API so the extension sees onCreated. */
+      /**
+       * Open a tab via the chrome API so the extension sees onCreated, and
+       * wait until the extension has recorded it.
+       *
+       * The wait matters: `chrome.tabs.create` resolves as soon as the tab
+       * exists, but the extension's onCreated listener writes its timestamp
+       * asynchronously afterwards. Without this, a `markIdle` call can be
+       * queued *before* that write and get overwritten by it, leaving the tab
+       * looking freshly used. Serializing the queue makes each update atomic
+       * but does not order them, so the wait has to happen here.
+       */
       async openTab(url, { pinned = false } = {}) {
-        return worker.evaluate(
+        const tabId = await worker.evaluate(
           ({ url, pinned }) =>
             chrome.tabs.create({ url, pinned, active: false }).then((t) => t.id),
           { url, pinned },
         );
+
+        await expect
+          .poll(
+            () =>
+              worker.evaluate(
+                (id) => self.__tabReaper.readActivity().then((a) => a[String(id)] !== undefined),
+                tabId,
+              ),
+            { message: `extension never recorded tab ${tabId} (${url})` },
+          )
+          .toBe(true);
+
+        return tabId;
       },
 
       async pin(tabId) {
