@@ -53,6 +53,15 @@ For the listing's **Store icon** field, upload `assets/store/store-icon-128.png`
 the art inset to 96x96, leaving 16px of transparent padding per side, whereas
 the manifest icons are deliberately full-bleed. `npm run icons` writes both.
 
+For **Screenshots**, upload `assets/store/screenshot-settings-1280x800.png` (the
+640x400 variant beside it is the same shot at the other size the store accepts —
+use it only if you specifically want the smaller one). `npm run screenshots`
+regenerates them by capturing the real settings page from a Chrome with the
+extension loaded, so re-run it whenever the options page changes. The store
+requires **24-bit PNG with no alpha**, which is why the script re-encodes the
+capture rather than writing Chrome's RGBA screenshot straight out; at least one
+screenshot is mandatory before a listing can be published.
+
 The **Privacy practices** tab wants a justification for each of `tabs`,
 `storage`, and `alarms`, plus a privacy policy URL.
 [`privacy.md`](privacy.md) has all four: paste the per-permission sections into

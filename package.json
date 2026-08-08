@@ -10,6 +10,7 @@
     "test": "npm run test:unit && npm run test:browser",
     "chrome": "node scripts/launch-chrome.js",
     "icons": "node scripts/make-icons.js",
+    "screenshots": "node scripts/make-screenshots.js",
     "package": "node scripts/package.js",
     "publish:store": "node scripts/publish.js",
     "verify:published": "node scripts/verify-provenance.js"

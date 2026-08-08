@@ -145,6 +145,7 @@ The download is Chrome for Testing, used by both the test suite and
 | `npm run test:browser` | Playwright tests against a real Chrome. |
 | `npm run chrome` | Opens a disposable Chrome with the extension loaded. |
 | `npm run icons` | Rebuilds `extension/icons/*.png` from `assets/*.svg`. |
+| `npm run screenshots` | Rebuilds the store listing screenshots in `assets/store/`. |
 | `npm run package` | Builds `dist/tab-reaper-<version>.zip` for the Web Store. |
 | `npm run verify:published` | Checks the published extension against a git ref. |
 | `node scripts/smoke.js` | One end-to-end pass; `--screenshot out.png` to capture the options page. |
@@ -210,6 +211,43 @@ After editing the art, run `npm run icons`, commit the PNGs, and reload the
 extension at `chrome://extensions`. Check the small sizes, not just the 128px
 version; `options.spec.js` asserts every declared icon actually loads, since a
 missing icon file fails silently in the toolbar.
+
+### Store listing screenshots
+
+```sh
+npm run screenshots
+```
+
+Writes `assets/store/screenshot-settings-1280x800.png` and a 640×400 twin — the
+two sizes the Chrome Web Store accepts. A listing needs at least one screenshot
+before it can be published.
+
+The settings page is captured from a **real Chrome with the extension loaded**,
+on its own `chrome-extension://` URL, with demo settings written through
+`chrome.storage` first so the allowlist and per-domain rules are populated
+rather than empty. A mock-up of the same form would drift from the real page and
+is grounds for rejection anyway.
+
+Two things make this more than a `page.screenshot()` call:
+
+**The page doesn't fit the frame.** At its 520px column the content runs about
+860px tall, so a 1280×800 capture would either crop the action bar or stretch the
+layout. Instead the full-height capture is scaled to fit and composited onto a
+backdrop with the product name beside it, so nothing is cut off and the aspect
+ratio is untouched. The composition happens on a canvas in the browser that's
+already open — the same no-dependency approach `make-icons.js` takes.
+
+**The store forbids alpha.** It wants "JPEG or 24-bit PNG (no alpha)", and every
+PNG a browser produces — `page.screenshot()`, `canvas.toDataURL()` — is 32-bit
+RGBA. `scripts/lib/png.js` re-encodes as colour type 2, compositing over an
+opaque background rather than merely dropping the alpha channel: discarding it
+would expose whatever sat beneath a transparent pixel, which for a screenshot is
+black, leaving dark fringes around the pane's shadow and rounded corners.
+`test/unit/png.test.js` checks the encoded bytes against the PNG spec and
+unfilters the scanlines with a separate implementation, rather than round-tripping
+through this repo's own reader.
+
+Re-run this after changing `options.html` or `options.css`, and commit the PNGs.
 
 ### Running it in a disposable Chrome
 
@@ -388,7 +426,7 @@ extension/                MV3 extension — chrome.* APIs only
   options.html/.css/.js   settings UI
   icons/                  generated PNGs (committed; see npm run icons)
 assets/                   icon source art (SVG)
-  store/                  store listing icon (not shipped in the extension)
+  store/                  listing icon + screenshots (not shipped in the extension)
 docs/
   privacy.md              privacy policy + permission justifications
   publishing.md           Web Store release setup and security model
@@ -400,11 +438,13 @@ test/
 scripts/
   launch-chrome.js        disposable Chrome for manual poking
   make-icons.js           SVG -> PNG rasterizer
+  make-screenshots.js     store listing screenshots of the settings page
   smoke.js                end-to-end check + screenshot
   package.js              builds the store zip (explicit file allowlist)
   publish.js              uploads + publishes via the Web Store API v2
   verify-provenance.js    checks a published CRX against a git ref
   lib/zip.js              minimal ZIP writer (no dependencies)
+  lib/png.js              PNG reader + 24-bit writer (the store forbids alpha)
   lib/crx.js              CRX3 + ZIP reader
   lib/treehash.js         Chrome's per-file hash, as the store signs it
   lib/provenance.js       the published-vs-source comparison
