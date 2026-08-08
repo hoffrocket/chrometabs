@@ -16,6 +16,7 @@ real browser in the tests; nothing under `extension/` imports it.
 - [Installing in your own Chrome](#installing-in-your-own-chrome)
 - [Settings](#settings)
 - [Development workflow](#development-workflow)
+- [Privacy](#privacy)
 - [Releasing](#releasing)
 - [Layout](#layout)
 - [Implementation notes](#implementation-notes)
@@ -285,6 +286,20 @@ of it: the form is now `disabled` until the settings read resolves (so a real
 user's typing can't be discarded either), and the test asserts
 `ext.getSettings()` rather than trusting the status line.
 
+## Privacy
+
+**The extension collects no data.** No server, no analytics, no telemetry, no
+network requests at all — the source contains no `fetch` and no remote endpoint.
+The three permissions it requests are the minimum the feature needs: `tabs` to
+list, watch, and close tabs (and to check a URL's scheme and hostname against
+your rules), `storage` to keep your settings and the per-tab "last active"
+timestamps, and `alarms` for the one-minute tick that survives service-worker
+eviction. Tab URLs are read in memory and discarded; nothing is logged, and the
+extension keeps no record of what it closed.
+
+**[Full policy → `docs/privacy.md`](docs/privacy.md)** — this is the document to
+link as the privacy policy in the Chrome Web Store listing.
+
 ## Releasing
 
 Releases are automated. Bump the version in `extension/manifest.json`, then push
@@ -321,6 +336,7 @@ extension/                MV3 extension — chrome.* APIs only
   icons/                  generated PNGs (committed; see npm run icons)
 assets/                   icon source art (SVG)
 docs/
+  privacy.md              privacy policy + permission justifications
   publishing.md           Web Store release setup and security model
 test/
   unit/                   node:test — reaper logic, zip writer, packaging

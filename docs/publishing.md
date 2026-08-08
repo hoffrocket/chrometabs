@@ -45,6 +45,18 @@ At [chrome.google.com/webstore/devconsole](https://chrome.google.com/webstore/de
 **Privacy practices** tabs → publish. Both tabs must be complete before any
 publish, automated or not, will succeed.
 
+The **Privacy practices** tab wants a justification for each of `tabs`,
+`storage`, and `alarms`, plus a privacy policy URL.
+[`privacy.md`](privacy.md) has all four: paste the per-permission sections into
+the justification fields, and use its GitHub URL as the policy link —
+
+```
+https://github.com/hoffrocket/chrometabs/blob/master/docs/privacy.md
+```
+
+Declare **no data collection** for every category; the extension makes no network
+requests, so there is nothing to disclose.
+
 Then copy the **item ID** from the dashboard URL — it's the 32-character string
 in `.../devconsole/.../items/<ITEM_ID>/edit`.
 
