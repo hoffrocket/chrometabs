@@ -5,6 +5,9 @@ playwright-report/
 .chrome-dev-profile/
 .DS_Store
 
+# Claude Code scratch space, including its worktrees.
+.claude/
+
 # Built store packages. Regenerate with `npm run package`; the release
 # workflow builds its own rather than trusting a committed artifact.
 dist/

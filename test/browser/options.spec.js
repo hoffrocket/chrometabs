@@ -50,6 +50,24 @@ test('the manifest declares icons that Chrome can actually load', async ({
     expect(status, `${relative} should be fetchable`).toBe(200);
   }
 
+  // Each icon must be the size it is declared under. Chrome scales a mismatched
+  // icon silently, so this went unnoticed until the store rejected the
+  // dimensions: the rasterizer rendered at 4x without downscaling and every
+  // icon shipped at 4x its declared size, quadrupling the package for nothing.
+  const declaredSizes = { ...(manifest.icons ?? {}), ...(manifest.action?.default_icon ?? {}) };
+  for (const [size, relative] of Object.entries(declaredSizes)) {
+    const actual = await page.evaluate(async (url) => {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return { width: img.naturalWidth, height: img.naturalHeight };
+    }, `chrome-extension://${extensionId}/${relative}`);
+    expect(actual, `${relative} is declared as ${size}px`).toEqual({
+      width: Number(size),
+      height: Number(size),
+    });
+  }
+
   // The options header renders the same art; naturalWidth stays 0 if it 404s.
   const header = await page.evaluate(() => {
     const img = document.querySelector('h1 img');

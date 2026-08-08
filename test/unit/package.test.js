@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import zlib from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -129,3 +130,124 @@ test('the service worker imports only files that are packaged', async () => {
     }
   }
 });
+
+test('every packaged icon is the size the manifest declares', async () => {
+  // A PNG's real dimensions are in its IHDR chunk, so this needs no browser.
+  // Chrome scales a mismatched icon silently and the manifest keeps claiming
+  // whatever it likes — which is how every icon here once shipped at 4x its
+  // declared size (the rasterizer rendered at 4x and never downscaled),
+  // quadrupling the package. The store, unlike Chrome, checks.
+  const { path: zipPath } = await pkg();
+  const { stdout: manifestJson } = await run('unzip', ['-p', zipPath, 'manifest.json']);
+  const manifest = JSON.parse(manifestJson);
+
+  const declared = { ...(manifest.icons ?? {}), ...(manifest.action?.default_icon ?? {}) };
+  assert.ok(Object.keys(declared).length > 0, 'the manifest should declare icons');
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'icon-size-'));
+  try {
+    for (const [size, relative] of Object.entries(declared)) {
+      await run('unzip', ['-o', '-q', zipPath, relative, '-d', dir]);
+      const { width, height } = readPngSize(await fs.readFile(path.join(dir, relative)));
+      assert.deepEqual(
+        { width, height },
+        { width: Number(size), height: Number(size) },
+        `${relative} is declared as ${size}px but is ${width}x${height}`,
+      );
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the store listing icon meets the store's own requirements", async () => {
+  // Not part of the extension, so nothing else would catch it drifting. The
+  // store requires exactly 128x128; the 96x96 inset is its guidance, since it
+  // draws shadow and hover effects in the margin.
+  const png = await fs.readFile(path.join(ROOT, 'assets', 'store', 'store-icon-128.png'));
+  assert.deepEqual(readPngSize(png), { width: 128, height: 128 });
+
+  // Confirm the art really is inset, rather than the file merely being 128px:
+  // the outermost 16px ring must be fully transparent.
+  const { width, height, pixels } = decodePng(png);
+  let maxAlphaInMargin = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const inMargin = x < 16 || y < 16 || x >= width - 16 || y >= height - 16;
+      if (inMargin) maxAlphaInMargin = Math.max(maxAlphaInMargin, pixels[(y * width + x) * 4 + 3]);
+    }
+  }
+  assert.equal(maxAlphaInMargin, 0, 'the outer 16px margin should be empty');
+});
+
+/** Read width/height out of a PNG's IHDR chunk. */
+function readPngSize(buffer) {
+  assert.equal(buffer.subarray(1, 4).toString('latin1'), 'PNG', 'not a PNG');
+  // IHDR is always the first chunk: 8-byte signature, 4-byte length, 4-byte type.
+  assert.equal(buffer.subarray(12, 16).toString('latin1'), 'IHDR');
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+/**
+ * Decode an 8-bit RGBA PNG to raw pixels.
+ *
+ * Node has zlib but no image decoder, and the project takes no dependencies, so
+ * the ~20 lines of PNG un-filtering live here. Only what these tests need is
+ * handled: colour type 6, bit depth 8, non-interlaced — which is what Chrome's
+ * screenshots produce. Anything else throws rather than returning wrong pixels.
+ */
+function decodePng(buffer) {
+  let offset = 8;
+  let width;
+  let height;
+  const idat = [];
+
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString('latin1', offset + 4, offset + 8);
+    if (type === 'IHDR') {
+      width = buffer.readUInt32BE(offset + 8);
+      height = buffer.readUInt32BE(offset + 12);
+      assert.equal(buffer[offset + 16], 8, 'expected 8-bit depth');
+      assert.equal(buffer[offset + 17], 6, 'expected colour type 6 (RGBA)');
+      assert.equal(buffer[offset + 20], 0, 'expected a non-interlaced PNG');
+    } else if (type === 'IDAT') {
+      idat.push(buffer.subarray(offset + 8, offset + 8 + length));
+    }
+    offset += 12 + length;
+    if (type === 'IEND') break;
+  }
+
+  // Each row is prefixed with a filter byte and encoded relative to the pixel
+  // to its left (`a`), the row above (`b`), and above-left (`c`).
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const bpp = 4;
+  const stride = width * bpp + 1;
+  const pixels = Buffer.alloc(width * height * bpp);
+
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * stride];
+    const row = pixels.subarray(y * width * bpp, (y + 1) * width * bpp);
+    raw.copy(row, 0, y * stride + 1, y * stride + 1 + width * bpp);
+
+    for (let i = 0; i < width * bpp; i += 1) {
+      const a = i >= bpp ? row[i - bpp] : 0;
+      const b = y > 0 ? pixels[(y - 1) * width * bpp + i] : 0;
+      const c = y > 0 && i >= bpp ? pixels[(y - 1) * width * bpp + i - bpp] : 0;
+      if (filter === 1) row[i] = (row[i] + a) & 0xff;
+      else if (filter === 2) row[i] = (row[i] + b) & 0xff;
+      else if (filter === 3) row[i] = (row[i] + ((a + b) >> 1)) & 0xff;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        row[i] = (row[i] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xff;
+      } else if (filter !== 0) {
+        throw new Error(`unsupported PNG filter ${filter} on row ${y}`);
+      }
+    }
+  }
+
+  return { width, height, pixels };
+}
