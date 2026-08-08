@@ -45,6 +45,11 @@ At [chrome.google.com/webstore/devconsole](https://chrome.google.com/webstore/de
 **Privacy practices** tabs → publish. Both tabs must be complete before any
 publish, automated or not, will succeed.
 
+For the listing's **Store icon** field, upload `assets/store/store-icon-128.png`
+— *not* one of the `extension/icons/` files. The store wants 128x128 overall
+with the art inset to 96x96 and 16px of transparent padding per side, whereas
+the manifest icons are deliberately full-bleed. `npm run icons` generates both.
+
 Then copy the **item ID** from the dashboard URL — it's the 32-character string
 in `.../devconsole/.../items/<ITEM_ID>/edit`.
 
