@@ -11,7 +11,8 @@
     "chrome": "node scripts/launch-chrome.js",
     "icons": "node scripts/make-icons.js",
     "package": "node scripts/package.js",
-    "publish:store": "node scripts/publish.js"
+    "publish:store": "node scripts/publish.js",
+    "verify:published": "node scripts/verify-provenance.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0"

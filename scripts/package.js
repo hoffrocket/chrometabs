@@ -21,8 +21,15 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const EXTENSION_DIR = path.join(ROOT, 'extension');
 const DIST_DIR = path.join(ROOT, 'dist');
 
-/** Everything that ships, relative to extension/. Order fixes archive order. */
-const FILES = [
+/**
+ * Everything that ships, relative to extension/. Order fixes archive order.
+ *
+ * Exported because it is the authoritative list of what a published build
+ * should contain: `verify-provenance.js` checks the store download against it
+ * in both directions, and the packaging tests assert the archive holds exactly
+ * this and nothing else.
+ */
+export const FILES = [
   'manifest.json',
   'background.js',
   'lib/reaper.js',
@@ -64,7 +71,15 @@ function manifestReferences(manifest) {
   return referenced;
 }
 
-export async function buildPackage({ quiet = false } = {}) {
+/**
+ * Build the archive and return `{ path, version, bytes, files }`.
+ *
+ * `outDir` exists for tests: `node --test` runs files in parallel, so two suites
+ * both building into `dist/` will write the same path at the same time and one
+ * can read a half-written archive. Passing separate directories removes the
+ * race rather than papering over it with retries.
+ */
+export async function buildPackage({ quiet = false, outDir = DIST_DIR } = {}) {
   const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
   const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
   const { version } = manifest;
@@ -91,8 +106,8 @@ export async function buildPackage({ quiet = false } = {}) {
   }
 
   const archive = zip(entries);
-  await fs.mkdir(DIST_DIR, { recursive: true });
-  const outPath = path.join(DIST_DIR, `tab-reaper-${version}.zip`);
+  await fs.mkdir(outDir, { recursive: true });
+  const outPath = path.join(outDir, `tab-reaper-${version}.zip`);
   await fs.writeFile(outPath, archive);
 
   if (!quiet) {

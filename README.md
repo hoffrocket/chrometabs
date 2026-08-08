@@ -146,6 +146,7 @@ The download is Chrome for Testing, used by both the test suite and
 | `npm run chrome` | Opens a disposable Chrome with the extension loaded. |
 | `npm run icons` | Rebuilds `extension/icons/*.png` from `assets/*.svg`. |
 | `npm run package` | Builds `dist/tab-reaper-<version>.zip` for the Web Store. |
+| `npm run verify:published` | Checks the published extension against a git ref. |
 | `node scripts/smoke.js` | One end-to-end pass; `--screenshot out.png` to capture the options page. |
 
 ### The loop
@@ -187,9 +188,23 @@ Those are the SVG sources at full size. What Chrome actually ships is the
 rasterized PNG, so judge the result at `chrome://extensions` and in the toolbar,
 not here.
 
-Rasterizing happens by screenshotting the SVG in the headless Chrome the tests
-already use — no image-processing dependency — rendered at 4x and downscaled,
-which antialiases the curves far better than rasterizing straight to 16px.
+Rasterizing happens in the headless Chrome the tests already use — no
+image-processing dependency. The SVG is rendered at 4× the target size and then
+downscaled on a canvas, which antialiases the curves far better than rasterizing
+straight to 16px. The downscale is the half that is easy to forget: screenshotting
+the 4× page directly is what the script used to do, and it silently committed
+512×512 files named `icon-128.png` for a while. Chrome scaled them on the fly, so
+nothing looked broken, but the store requires exact dimensions and the extension
+was carrying 54KB of icons it could not use at face value.
+
+`npm run icons` also writes **`assets/store/store-icon-128.png`**, the Chrome
+Web Store listing icon. It isn't part of the extension, so it stays in
+`assets/`. Same art, different rules: exactly 128×128 with the artwork inset to
+96×96, because the store draws its own shadow and hover effects in that margin —
+an edge-to-edge icon looks oversized beside every other listing. The art is also
+trimmed to its ink before being fitted, since `icon.svg` carries slack inside its
+own viewBox; scaling the viewBox alone leaves the visible mark at 69×90 and off
+centre, reading smaller than its neighbours despite the file being correct.
 
 After editing the art, run `npm run icons`, commit the PNGs, and reload the
 extension at `chrome://extensions`. Check the small sizes, not just the 128px
@@ -229,13 +244,23 @@ handle. Route timestamp edits through `updateActivity` rather than writing
 
 ### How the tests are organized
 
-- **`test/unit/`** (39 tests) is plain Node, no browser.
-  - `reaper.test.js` exercises `extension/lib/reaper.js`: thresholds, allowlist
-    matching, rule parsing and specificity, exemptions.
-  - `zip.test.js` checks the hand-rolled ZIP writer's bytes against the spec.
-  - `package.test.js` extracts a real store package with the system `unzip` —
-    an independent implementation, since our own reader could share a bug with
-    our writer — and asserts the archive holds exactly the declared files.
+- **`test/unit/`** (75 tests) is plain Node, no browser.
+  - `reaper.test.js` (20) exercises `extension/lib/reaper.js`: thresholds,
+    allowlist matching, rule parsing and specificity, exemptions.
+  - `zip.test.js` (13) checks the hand-rolled ZIP writer's bytes against the
+    spec, including that nothing is compressed — see
+    [`docs/provenance.md`](docs/provenance.md) for why that matters.
+  - `package.test.js` (10) extracts a real store package with the system `unzip`
+    — an independent implementation, since our own reader could share a bug with
+    our writer — and asserts the archive holds exactly the declared files, and
+    that each icon is the size its manifest entry claims.
+  - `crx.test.js` (8) reads CRX3 containers, and reads an archive built by the
+    system `zip` so the reader isn't only ever tested against our own writer.
+  - `treehash.test.js` (9) pins Chrome's per-file hash to expectations derived
+    from the algorithm rather than from its own output.
+  - `provenance.test.js` (14) builds a store-style CRX and tampers with it one
+    way at a time, asserting each is caught. A verifier that only ever passes
+    proves nothing.
 - **`test/browser/`** (20 tests) loads the real extension into a real Chrome and
   drives it through the actual `chrome.tabs` API — opening tabs, pinning,
   activating, sweeping — then asserts which tabs survived.
@@ -325,6 +350,34 @@ review still gates going live.
 
 **[Full setup and security model → `docs/publishing.md`](docs/publishing.md)**
 
+### Verifying a published release
+
+A store listing normally tells you nothing about which source it was built from.
+This one can be checked, by anyone, with no credentials:
+
+```sh
+git checkout v0.1.0
+node scripts/verify-provenance.js --item <store item id> --ref v0.1.0
+```
+
+That downloads the CRX from Google's own update endpoint and compares every file
+against the tag twice — against the source, and against the per-file hashes
+Google signed into the package (the same ones Chrome checks before running an
+extension). It exits non-zero on any mismatch.
+
+Releases also carry a GitHub build attestation binding the package to the commit
+that produced it, recorded in a public transparency log:
+
+```sh
+npm run package     # deterministic: same source, same bytes, any machine
+gh attestation verify dist/tab-reaper-0.1.0.zip --repo hoffrocket/chrometabs
+```
+
+Byte-identity between a commit and the store *download* is not achievable — the
+store repackages every upload — so the check is per-file rather than
+whole-archive. **[What is and isn't provable, and why →
+`docs/provenance.md`](docs/provenance.md)**
+
 ## Layout
 
 ```
@@ -335,11 +388,13 @@ extension/                MV3 extension — chrome.* APIs only
   options.html/.css/.js   settings UI
   icons/                  generated PNGs (committed; see npm run icons)
 assets/                   icon source art (SVG)
+  store/                  store listing icon (not shipped in the extension)
 docs/
   privacy.md              privacy policy + permission justifications
   publishing.md           Web Store release setup and security model
+  provenance.md           proving a published build came from a commit
 test/
-  unit/                   node:test — reaper logic, zip writer, packaging
+  unit/                   node:test — reaper logic, zip, packaging, provenance
   browser/                Playwright tests driving real Chrome
     fixtures.js           the `ext` fixture and extension-context helpers
 scripts/
@@ -348,7 +403,11 @@ scripts/
   smoke.js                end-to-end check + screenshot
   package.js              builds the store zip (explicit file allowlist)
   publish.js              uploads + publishes via the Web Store API v2
+  verify-provenance.js    checks a published CRX against a git ref
   lib/zip.js              minimal ZIP writer (no dependencies)
+  lib/crx.js              CRX3 + ZIP reader
+  lib/treehash.js         Chrome's per-file hash, as the store signs it
+  lib/provenance.js       the published-vs-source comparison
 playwright.config.js
 ```
 
@@ -385,6 +444,11 @@ playwright.config.js
 - **The release tooling has no dependencies either.** Node ships `zlib` but no
   archive format, so `scripts/lib/zip.js` writes the ZIP container by hand
   (~120 lines) rather than pulling in a packaging library, and `publish.js`
-  talks to Google's REST APIs with `fetch`. Archives are byte-reproducible:
-  timestamps are fixed and entry order is explicit, so the same source always
-  yields the same package.
+  talks to Google's REST APIs with `fetch`.
+- **The package is stored, not compressed, so its digest is reproducible.**
+  Deflate output isn't standardised — with compression on, the same source
+  produced two different digests across five Node versions (zlib 1.2.x vs
+  1.3.x). Since a build attestation only means something if you can reproduce
+  the digest it covers, and the store recompresses uploads anyway, the 23% size
+  cost buys something real. Fixed timestamps and explicit entry order do the
+  rest.

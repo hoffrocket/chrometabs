@@ -6,9 +6,26 @@
  * needs is implemented: stored/deflated file entries, no directory entries,
  * no Zip64, no encryption.
  *
- * Archives are byte-for-byte reproducible: entry order is caller-controlled
- * and every timestamp is fixed, so the same input always yields the same
- * bytes. That means a rebuilt package can be compared against a published one.
+ * Archives are byte-for-byte reproducible on any machine: entry order is
+ * caller-controlled, every timestamp is fixed, and entries are **stored rather
+ * than deflated** by default. That last point is not an optimisation choice —
+ * it is what makes the digest meaningful.
+ *
+ * Deflate output is not standardised. Measured across five Node versions, the
+ * same input produced two different archives:
+ *
+ *   node 16 (zlib 1.2.11), node 26 (zlib 1.2.12)      -> 1195ee5b…
+ *   node 20, 22 (zlib 1.3.0.1-motley), node 24 (1.3.1) -> 0c812d88…
+ *
+ * So a compressed archive's hash depends on the toolchain that built it, and
+ * "rebuild it yourself and compare the digest" would fail for anyone on a
+ * different Node — exactly the people a provenance claim is aimed at. Storing
+ * costs about 23% more bytes (63 KB -> 77 KB here) and buys a digest that
+ * anyone can reproduce forever. The store recompresses uploads anyway, so the
+ * compression never reached users in the first place.
+ *
+ * `compress: true` re-enables deflate for callers that want small over
+ * reproducible.
  */
 import zlib from 'node:zlib';
 
@@ -58,7 +75,7 @@ export function crc32(buffer) {
  * spec requires it, and a backslash would make the entry unreadable on the
  * store's side.
  */
-export function zip(entries) {
+export function zip(entries, { compress = false } = {}) {
   const locals = [];
   const centrals = [];
   let offset = 0;
@@ -70,11 +87,11 @@ export function zip(entries) {
     }
     const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data);
 
-    // Deflate everything, then keep it only if it actually helped. Tiny or
-    // already-compressed files (the PNGs) can deflate *larger* than they
-    // started, and storing those keeps the package smaller.
-    const deflated = zlib.deflateRawSync(data, { level: 9 });
-    const useDeflate = deflated.length < data.length;
+    // When compressing, deflate then keep it only if it actually helped: tiny
+    // or already-compressed files (the PNGs) can deflate *larger* than they
+    // started. Off by default — see the note on reproducibility above.
+    const deflated = compress ? zlib.deflateRawSync(data, { level: 9 }) : null;
+    const useDeflate = deflated !== null && deflated.length < data.length;
     const payload = useDeflate ? deflated : data;
     const method = useDeflate ? METHOD_DEFLATE : METHOD_STORE;
     const checksum = crc32(data);

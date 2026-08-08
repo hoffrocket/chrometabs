@@ -29,6 +29,16 @@ jobs:
     timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.digest.outputs.digest }}
+    permissions:
+      contents: read
+      # Signs the build attestation that binds the package to this commit. This
+      # is the *only* extra privilege here, and it grants nothing towards the
+      # store: attestation identities are issued by Sigstore, and this job has
+      # no path to Google. Attesting here rather than in `publish` keeps the
+      # credential-bearing job free of any action that handles keys.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -80,12 +90,41 @@ jobs:
       - name: Build the store package
         run: npm run package
 
+      # Record the digest of exactly what was built, so the attestation, the
+      # artifact and the store upload can all be tied to one another by hash.
+      - name: Record the package digest
+        id: digest
+        run: |
+          set -euo pipefail
+          zip="$(ls dist/*.zip)"
+          digest="$(sha256sum "$zip" | cut -d' ' -f1)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "sha256($zip) = $digest"
+
+      # Bind the package to this commit, cryptographically and publicly.
+      #
+      # This produces a Sigstore-signed statement — "commit <sha> of this
+      # repository, built by this workflow run, produced a zip with this
+      # digest" — recorded in a public transparency log. Anyone can check it
+      # with `gh attestation verify`, and the signing identity is GitHub's OIDC
+      # issuer, not a key this repository holds.
+      #
+      # This is the one third-party-shaped action in the release path. It is
+      # GitHub's own, like checkout and setup-node, and it runs in this job,
+      # which holds no store credentials. Hand-rolling it is not a real
+      # alternative: the value comes from the signature chaining to GitHub's own
+      # identity, which cannot be reproduced with `run:` steps.
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.zip
+
       - name: Upload the package for inspection
         uses: actions/upload-artifact@v4
         with:
           name: tab-reaper-${{ steps.version.outputs.version }}
           path: dist/*.zip
-          retention-days: 30
+          retention-days: 90
 
   publish:
     needs: verify
@@ -124,6 +163,26 @@ jobs:
       # Rebuild rather than downloading the verify job's artifact: an artifact
       # is mutable by any later job, and the build is deterministic, so
       # rebuilding from the checked-out tag is both simpler and safer.
+      # The attestation covers the digest `verify` built. This job rebuilds
+      # rather than downloading that artifact (an artifact can be replaced by
+      # any later job, and the build is deterministic), so the rebuild has to
+      # land on the same digest — otherwise the thing published is not the thing
+      # attested, and the provenance claim would be false.
+      - name: Check the rebuild matches the attested package
+        env:
+          EXPECTED_DIGEST: ${{ needs.verify.outputs.digest }}
+        run: |
+          set -euo pipefail
+          npm run package
+          zip="$(ls dist/*.zip)"
+          digest="$(sha256sum "$zip" | cut -d' ' -f1)"
+          if [ "$digest" != "$EXPECTED_DIGEST" ]; then
+            echo "::error::Rebuild digest $digest does not match the attested $EXPECTED_DIGEST."
+            echo "The package is meant to be byte-reproducible; publishing would break provenance."
+            exit 1
+          fi
+          echo "Rebuild matches the attested digest ($digest)."
+
       - name: Publish to the Chrome Web Store
         env:
           # Non-secret identifiers, kept as environment variables so they are

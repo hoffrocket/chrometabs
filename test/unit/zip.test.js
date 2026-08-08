@@ -88,22 +88,35 @@ test('every entry records a correct CRC and uncompressed size', () => {
   assert.equal(entry.uncompressedSize, data.length);
 });
 
-test('compressible data is deflated', () => {
+test('data is stored, not deflated, by default', () => {
+  // Deliberate: deflate output varies by zlib version, so a compressed archive
+  // has a different digest depending on the Node that built it. Storing is what
+  // makes "rebuild it and compare the hash" work for someone else. See the note
+  // at the top of scripts/lib/zip.js.
   const data = Buffer.from('x'.repeat(2000));
   const [entry] = readCentralDirectory(zip([{ name: 'big.txt', data }]));
+
+  assert.equal(entry.method, 0, 'stored');
+  assert.equal(entry.compressedSize, data.length);
+  assert.equal(entry.data.toString(), data.toString());
+});
+
+test('compress: true deflates what is worth deflating', () => {
+  const data = Buffer.from('x'.repeat(2000));
+  const [entry] = readCentralDirectory(zip([{ name: 'big.txt', data }], { compress: true }));
 
   assert.equal(entry.method, 8, 'deflate');
   assert.ok(entry.compressedSize < data.length, 'should actually be smaller');
   assert.equal(entry.data.toString(), data.toString());
 });
 
-test('incompressible data is stored rather than inflated in size', () => {
-  // Deflating random bytes produces *more* bytes than it started with. Storing
-  // those keeps the package smaller, so check the writer notices.
+test('compress: true still stores incompressible data', () => {
+  // Deflating random bytes produces *more* bytes than it started with, so the
+  // writer has to notice and fall back to storing.
   const data = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xf3, 0x21, 0x9c, 0x7d,
   ]);
-  const [entry] = readCentralDirectory(zip([{ name: 'noise.png', data }]));
+  const [entry] = readCentralDirectory(zip([{ name: 'noise.png', data }], { compress: true }));
 
   assert.equal(entry.method, 0, 'stored');
   assert.equal(entry.compressedSize, data.length);
@@ -124,6 +137,22 @@ test('the same input always produces identical bytes', () => {
     { name: 'b.js', data: Buffer.from('const b = 2;') },
   ];
   assert.deepEqual(zip(entries), zip(entries), 'timestamps must not vary between builds');
+});
+
+test('the archive contains no output from zlib', () => {
+  // The provenance claim is "rebuild this and you get the same digest", which
+  // holds across machines only if nothing in the archive depends on the local
+  // zlib. Measured: with deflate on, five Node versions produced two different
+  // digests (zlib 1.2.x vs 1.3.x). This asserts the property directly, so
+  // switching the default back to compressing fails here rather than silently
+  // making published digests unreproducible.
+  const entries = [
+    { name: 'manifest.json', data: Buffer.from('{"version":"1.0"}') },
+    { name: 'big.js', data: Buffer.from('export const x = 1;\n'.repeat(500)) },
+  ];
+  for (const entry of readCentralDirectory(zip(entries))) {
+    assert.equal(entry.method, 0, `${entry.name} is compressed, so its bytes depend on zlib`);
+  }
 });
 
 test('an empty archive is still structurally valid', () => {
