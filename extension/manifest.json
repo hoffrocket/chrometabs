@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Reaper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Automatically closes tabs you haven't used for a configurable amount of time.",
   "minimum_chrome_version": "121",
   "permissions": ["tabs", "storage", "alarms"],
