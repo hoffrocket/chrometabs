@@ -196,7 +196,10 @@ async function waitForUpload({ accessToken, publisherId, itemId }) {
     if (state === 'FAILED') {
       throw new Error('The store reports the upload failed; not publishing.');
     }
-    if (state !== 'IN_PROGRESS') return status;
+    if (state === 'SUCCEEDED') return status;
+    if (state !== 'IN_PROGRESS') {
+      throw new Error(`The store reports an unexpected upload state (${state ?? 'unknown'}); not publishing.`);
+    }
 
     if (Date.now() > deadline) {
       throw new Error('Upload still processing after 8 minutes; not publishing.');
