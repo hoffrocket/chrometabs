@@ -169,36 +169,61 @@ async function fetchStatus({ accessToken, publisherId, itemId }) {
 }
 
 /**
- * Wait out an asynchronous upload.
+ * Wait out an upload the store chose to process asynchronously.
  *
- * The store may return UPLOAD_IN_PROGRESS and finish processing afterwards.
- * Publishing during that window fails, or worse, publishes the previous
- * package — so settle the upload before submitting.
+ * Normally `media.upload` is synchronous and comes back SUCCEEDED, in which
+ * case the caller skips this entirely. The store may instead return
+ * IN_PROGRESS and finish afterwards; publishing during that window fails, or
+ * worse, publishes the previous package — so settle the upload before
+ * submitting.
+ *
+ * The state lives in `lastAsyncUploadState`, which fetchStatus only sets when
+ * there has been an async upload in the past 24 hours. An absent value
+ * therefore means "nothing in flight", not "still working", so anything other
+ * than an explicit IN_PROGRESS ends the wait.
+ *
+ * The deadline stays inside the 600s impersonation token's lifetime; polling
+ * past expiry would surface a confusing 401 instead of a timeout.
  */
-async function waitForUpload({ accessToken, publisherId, itemId, expectedVersion }) {
-  const deadline = Date.now() + 10 * 60_000;
+async function waitForUpload({ accessToken, publisherId, itemId }) {
+  const deadline = Date.now() + 8 * 60_000;
   let delay = 5_000;
 
   for (;;) {
     const status = await fetchStatus({ accessToken, publisherId, itemId });
-    const state = status.uploadState ?? status.state;
+    const state = status.lastAsyncUploadState;
 
-    if (state && state !== 'UPLOAD_IN_PROGRESS') {
-      if (status.crxVersion && expectedVersion && status.crxVersion !== expectedVersion) {
-        throw new Error(
-          `Store reports version ${status.crxVersion} but ${expectedVersion} was uploaded. ` +
-            'Refusing to publish a version this run did not build.',
-        );
-      }
-      return status;
+    if (state === 'FAILED') {
+      throw new Error('The store reports the upload failed; not publishing.');
     }
+    if (state === 'SUCCEEDED') return status;
+    if (state !== 'IN_PROGRESS') {
+      throw new Error(`The store reports an unexpected upload state (${state ?? 'unknown'}); not publishing.`);
+    }
+
     if (Date.now() > deadline) {
-      throw new Error('Upload still processing after 10 minutes; not publishing.');
+      throw new Error('Upload still processing after 8 minutes; not publishing.');
     }
-    console.log(`Upload still processing (${state ?? 'unknown state'}); retrying in ${delay / 1000}s.`);
+    console.log(`Upload still processing; retrying in ${delay / 1000}s.`);
     await new Promise((resolve) => setTimeout(resolve, delay));
     delay = Math.min(delay * 2, 30_000);
   }
+}
+
+/**
+ * Every package version the store currently reports for an item.
+ *
+ * crxVersion is nested per release channel under the published and submitted
+ * revisions, so there can be more than one (a live version plus one awaiting
+ * review, say). Returned as a list rather than picking one, because which
+ * revision holds a freshly uploaded draft depends on whether anything has been
+ * submitted since the last publish.
+ */
+function storeVersions(status) {
+  return [status.publishedItemRevisionStatus, status.submittedItemRevisionStatus]
+    .flatMap((revision) => revision?.distributionChannels ?? [])
+    .map((channel) => channel.crxVersion)
+    .filter(Boolean);
 }
 
 async function publishItem({ accessToken, publisherId, itemId }) {
@@ -250,32 +275,63 @@ async function main() {
 
   if (checkAuth) {
     const status = await fetchStatus({ accessToken, publisherId, itemId });
+    const versions = storeVersions(status);
     console.log('Authentication works and the item is reachable.');
-    console.log(`  item:          ${status.itemId ?? itemId}`);
-    console.log(`  store version: ${status.crxVersion ?? '(none published yet)'}`);
-    console.log(`  state:         ${status.state ?? status.uploadState ?? 'unknown'}`);
-    console.log(`  local version: ${pkg.version}`);
+    console.log(`  item:           ${status.itemId ?? itemId}`);
+    console.log(`  store versions: ${versions.join(', ') || '(none published yet)'}`);
+    console.log(`  published:      ${status.publishedItemRevisionStatus?.state ?? '(not published)'}`);
+    console.log(`  submitted:      ${status.submittedItemRevisionStatus?.state ?? '(nothing pending)'}`);
+    console.log(`  last upload:    ${status.lastAsyncUploadState ?? '(none in the past 24h)'}`);
+    console.log(`  local version:  ${pkg.version}`);
     console.log('\nNothing was uploaded or published.');
     return;
   }
 
   console.log(`Uploading v${pkg.version} to item ${itemId}…`);
   const upload = await uploadPackage({ accessToken, publisherId, itemId, zipPath: pkg.path });
-  console.log(`Upload accepted (state: ${upload.uploadState ?? 'unknown'}).`);
+  const uploadState = upload.uploadState ?? 'unknown';
+  console.log(`Upload accepted (state: ${uploadState}).`);
 
-  const status = await waitForUpload({
-    accessToken,
-    publisherId,
-    itemId,
-    expectedVersion: pkg.version,
-  });
-  console.log(`Upload settled (state: ${status.uploadState ?? status.state ?? 'unknown'}).`);
+  if (uploadState === 'FAILED') {
+    throw new Error('The store rejected the upload; not publishing.');
+  }
+  // SUCCEEDED means processing is already done, which is the normal case — only
+  // an asynchronous upload needs waiting out.
+  if (uploadState === 'IN_PROGRESS') {
+    await waitForUpload({ accessToken, publisherId, itemId });
+    console.log('Upload finished processing.');
+  }
+
+  // Look, but do not block. The intent is to catch the store holding a package
+  // other than the one just uploaded, but an uploaded draft is not necessarily
+  // reported yet: submittedItemRevisionStatus stays unset until something is
+  // actually submitted, so "not found here" is expected rather than wrong. The
+  // assertion that can be trusted happens after publishing, below.
+  const before = storeVersions(await fetchStatus({ accessToken, publisherId, itemId }));
+  if (before.length && !before.includes(pkg.version)) {
+    console.warn(
+      `Note: the store reports ${before.join(', ')} and not v${pkg.version} yet; ` +
+        'this is normal for a draft that has not been submitted.',
+    );
+  }
 
   const result = await publishItem({ accessToken, publisherId, itemId });
   for (const warning of result.warningInfo?.warnings ?? []) {
     console.warn(`Store warning [${warning.reason}]: ${warning.description}`);
   }
   console.log(`Submitted v${pkg.version} for review (state: ${result.state ?? 'unknown'}).`);
+
+  // Now the version guard can be asserted: the submission exists, so the store
+  // reports the version under review. If that is not the version this run
+  // built, something else was submitted and the release needs a human.
+  const submitted = storeVersions(await fetchStatus({ accessToken, publisherId, itemId }));
+  if (submitted.length && !submitted.includes(pkg.version)) {
+    throw new Error(
+      `Submitted v${pkg.version} but the store reports ${submitted.join(', ')}. ` +
+        'Check the dashboard before trusting this release.',
+    );
+  }
+
   console.log('It goes live automatically once Google approves it.');
 }
 
